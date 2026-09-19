@@ -1,5 +1,6 @@
 pub mod config;
 pub mod data;
+pub mod gguf;
 pub mod mask;
 pub mod model;
 pub mod ops;

@@ -11,6 +11,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 byteorder = { workspace = true }
 anyhow = { workspace = true }
+half = "2.4"
 
 [dev-dependencies]
 burn-ndarray = { workspace = true }
