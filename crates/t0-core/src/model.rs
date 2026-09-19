@@ -284,10 +284,27 @@ pub fn forecast<B: Backend>(
     forecast_series(model, raw, t_ctx, horizon, device, want_trace)
 }
 
+/// Default chunk size for `forecast_batch`'s wgpu-safe chunked execution.
+/// `cubek-matmul`'s autotune picks a group-attention matmul tile that needs
+/// 40 KB of shared memory on shapes with `n_signals > 16` (`v`/`n_signals`
+/// is the group-attention matmul's contraction dim); Metal's per-threadgroup
+/// limit is 32 KB (see `docs/runs/2026-09-19-milestone1a.md`). 16 is the
+/// largest `n_signals` confirmed to fit under that limit — see the binary
+/// search recorded there.
+pub const DEFAULT_BATCH_CHUNK: usize = 16;
+
 /// Batched forecast over `n_signals` independent univariate series (see
 /// `TimeSeries::from_context_batch`): one forward pass, `v = n_signals`,
 /// each signal isolated from the others by a distinct group id so
 /// cross-variate group-attention layers never mix them.
+///
+/// Internally chunks into groups of `DEFAULT_BATCH_CHUNK` signals (see
+/// `forecast_batch_chunked` to override the chunk size) so the group-attention
+/// matmul's contraction dim never exceeds the shape that trips the wgpu
+/// shared-memory autotune bug above. Transparent to callers: output is
+/// identical to one un-chunked forward pass (each chunk gets fresh group
+/// ids and the chunks are fully independent — no cross-chunk attention is
+/// possible even in the un-chunked path).
 pub fn forecast_batch<B: Backend>(
     model: &T0Model<B>,
     contexts: &[f32],
@@ -296,8 +313,33 @@ pub fn forecast_batch<B: Backend>(
     horizon: usize,
     device: &B::Device,
 ) -> Vec<f32> {
-    let raw = TimeSeries::from_context_batch(contexts, n_signals, t_ctx, horizon);
-    forecast_series(model, raw, t_ctx, horizon, device, false).0
+    forecast_batch_chunked(model, contexts, n_signals, t_ctx, horizon, device, DEFAULT_BATCH_CHUNK)
+}
+
+/// `forecast_batch` with an overridable chunk size (0 or >= n_signals means
+/// "no chunking, one forward pass").
+pub fn forecast_batch_chunked<B: Backend>(
+    model: &T0Model<B>,
+    contexts: &[f32],
+    n_signals: usize,
+    t_ctx: usize,
+    horizon: usize,
+    device: &B::Device,
+    chunk_size: usize,
+) -> Vec<f32> {
+    let chunk_size = if chunk_size == 0 { n_signals } else { chunk_size.min(n_signals) };
+    let n_q = model.config.n_quantiles();
+    let mut out = vec![0.0f32; n_signals * horizon * n_q];
+    let mut start = 0;
+    while start < n_signals {
+        let n = chunk_size.min(n_signals - start);
+        let chunk_ctx = &contexts[start * t_ctx..(start + n) * t_ctx];
+        let raw = TimeSeries::from_context_batch(chunk_ctx, n, t_ctx, horizon);
+        let (chunk_out, _) = forecast_series(model, raw, t_ctx, horizon, device, false);
+        out[start * horizon * n_q..(start + n) * horizon * n_q].copy_from_slice(&chunk_out);
+        start += n;
+    }
+    out
 }
 
 fn forecast_series<B: Backend>(
