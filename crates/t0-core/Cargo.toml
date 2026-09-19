@@ -1,0 +1,21 @@
+[package]
+name = "t0-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+burn = { workspace = true }
+safetensors = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+byteorder = { workspace = true }
+anyhow = { workspace = true }
+
+[dev-dependencies]
+burn-ndarray = { workspace = true }
+
+# Burn's dependency chain pulls in `rand`, which needs `getrandom` on
+# wasm32-unknown-unknown; the required cfg flag lives in .cargo/config.toml.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.3", features = ["wasm_js"] }
