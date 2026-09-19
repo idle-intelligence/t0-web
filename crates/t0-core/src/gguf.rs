@@ -70,6 +70,30 @@ impl GgmlType {
     }
 }
 
+/// Per-channel (per output row) signed INT8 quantize-then-dequantize
+/// round-trip, matching the recipe published on
+/// `theforecastingcompany/t0-beta-onnx-int8` ("per-channel signed INT8
+/// weights ... FP32 compute"): one scale per row (`amax_row/127`), not
+/// llama.cpp's fixed 32-value blocks. This never leaves memory as an actual
+/// INT8 buffer — it simulates the accuracy effect of their recipe for the
+/// drift benchmark (`t0-cli drift --quant int8-theirs`), since compute on
+/// both sides stays FP32 either way (see `docs/BENCHMARKS.md`).
+pub fn int8_per_channel_roundtrip(x: &[f32], rows: usize, cols: usize) -> Vec<f32> {
+    assert_eq!(x.len(), rows * cols);
+    let mut out = vec![0.0f32; x.len()];
+    for row in 0..rows {
+        let r = &x[row * cols..(row + 1) * cols];
+        let amax = r.iter().fold(0.0f32, |a, &v| a.max(v.abs()));
+        let d = amax / 127.0;
+        let id = if d != 0.0 { 1.0 / d } else { 0.0 };
+        for (i, &v) in r.iter().enumerate() {
+            let q = (v * id).round().clamp(-128.0, 127.0) as i8;
+            out[row * cols + i] = q as f32 * d;
+        }
+    }
+    out
+}
+
 /// Quantize a flat row-major f32 buffer to Q8_0 blocks of `QK` values:
 /// `d = amax/127`, `qs[i] = round(x[i]/d)`. Matches llama.cpp's
 /// `quantize_row_q8_0_ref`.
