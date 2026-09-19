@@ -6,13 +6,13 @@
  *
  * Protocol:
  *   Main -> Worker:
- *     { type: 'load' }                       -- fetch WASM + model + series, init
- *     { type: 'forecast', origin: number }   -- forecast from this split point
+ *     { type: 'load' }                                    -- fetch WASM + model + series, init
+ *     { type: 'forecast', origin: number, requestId: number } -- forecast from this split point
  *
  *   Worker -> Main:
- *     { type: 'status', text: string }
- *     { type: 'ready', series, seriesName, startDate, freq, modelBytes, loadMs, nQuantiles, contextCap, horizon }
- *     { type: 'forecast', origin, originDate, quantiles, nQuantiles, ms }
+ *     { type: 'status', text: string, key?: string }  -- key present => update that one log line in place
+ *     { type: 'ready', series, seriesName, startDate, freq, modelBytes, loadMs, nQuantiles, contextCap, horizon, backend }
+ *     { type: 'forecast', origin, originDate, requestId, quantiles, nQuantiles, horizon, ms }
  *     { type: 'error', message: string }
  */
 
@@ -23,7 +23,9 @@ const CACHE_NAME = 't0-model-v1';
 
 // Context is capped at the same 512 used by docs/BENCHMARKS.md's latency
 // table; horizon 32 matches it too, so this demo's per-forecast ms is
-// directly comparable to that native CPU number.
+// directly comparable to that native CPU number. The chart only ever
+// *displays* the trailing 160 context points (see index.html) -- the model
+// still sees up to CONTEXT_CAP points.
 const CONTEXT_CAP = 512;
 const HORIZON = 32;
 
@@ -46,7 +48,7 @@ self.onmessage = async (e) => {
         if (type === 'load') {
             await handleLoad();
         } else if (type === 'forecast') {
-            handleForecast(data.origin);
+            await handleForecast(data.origin, data.requestId);
         } else {
             console.warn('[worker] unknown message type:', type);
         }
@@ -59,7 +61,7 @@ async function cachedFetch(url, label) {
     const cache = await caches.open(CACHE_NAME);
     const cached = await cache.match(url);
     if (cached) {
-        self.postMessage({ type: 'status', text: `${label} (cached)` });
+        self.postMessage({ type: 'status', key: 'download', text: `${label} (cached)` });
         return await cached.arrayBuffer();
     }
 
@@ -78,7 +80,7 @@ async function cachedFetch(url, label) {
         loaded += value.byteLength;
         if (contentLength > 0) {
             const pct = ((loaded / contentLength) * 100).toFixed(0);
-            self.postMessage({ type: 'status', text: `${label}: ${pct}%` });
+            self.postMessage({ type: 'status', key: 'download', text: `${label}: ${pct}%` });
         }
     }
     const buf = new Uint8Array(loaded);
@@ -101,18 +103,27 @@ async function handleLoad() {
     t0wasm = await import(wasmJsUrl);
     await t0wasm.default();
 
-    self.postMessage({ type: 'status', text: 'Downloading model (Q8_0, ~109 MB)...' });
+    self.postMessage({ type: 'status', key: 'download', text: 'Downloading model (Q8_0, ~109 MB)...' });
     const modelBuf = await cachedFetch(MODEL_URL, 'Downloading model');
 
-    self.postMessage({ type: 'status', text: 'Loading model...' });
+    self.postMessage({ type: 'status', key: 'load', text: 'Loading model...' });
     const t0 = performance.now();
     model = t0wasm.T0Wasm.load(new Uint8Array(modelBuf));
     const loadMs = performance.now() - t0;
+    self.postMessage({ type: 'status', key: 'load', text: `Model loaded in ${loadMs.toFixed(0)} ms` });
 
-    self.postMessage({ type: 'status', text: 'Loading series...' });
+    self.postMessage({ type: 'status', key: 'series', text: 'Loading series...' });
     const seriesBuf = await fetch(SERIES_URL).then((r) => r.arrayBuffer());
     series = new Float32Array(seriesBuf);
     seriesMeta = await fetch(SERIES_META_URL).then((r) => r.json());
+    self.postMessage({
+        type: 'status',
+        key: 'series',
+        text: `Series: ${seriesMeta.name} (${seriesMeta.n_points} points, ${seriesMeta.start_date.slice(0, 10)} to ${dateAtIndex(seriesMeta.n_points - 1)})`,
+    });
+
+    const backend = 'wasm/ndarray';
+    self.postMessage({ type: 'status', key: 'backend', text: `Backend: ${backend}` });
 
     self.postMessage({
         type: 'ready',
@@ -125,14 +136,11 @@ async function handleLoad() {
         nQuantiles: model.nQuantiles(),
         contextCap: CONTEXT_CAP,
         horizon: HORIZON,
-    });
-    self.postMessage({
-        type: 'status',
-        text: `Ready — series: ${seriesMeta.name} (${seriesMeta.n_points} points, ${seriesMeta.start_date.slice(0, 10)} to ${dateAtIndex(seriesMeta.n_points - 1)})`,
+        backend,
     });
 }
 
-function handleForecast(origin) {
+async function handleForecast(origin, requestId) {
     if (!model || !series) {
         self.postMessage({ type: 'error', message: 'forecast requested before model/series ready' });
         return;
@@ -140,12 +148,16 @@ function handleForecast(origin) {
     const ctxStart = Math.max(0, origin - CONTEXT_CAP);
     const context = series.slice(ctxStart, origin);
     const t0 = performance.now();
-    const quantiles = model.forecast(context, HORIZON);
+    // model.forecast is always async now (t0-wasm's wgpu build needs a real
+    // async GPU readback; the ndarray build resolves the same Promise
+    // immediately) -- always `await`, never assume a sync return value.
+    const quantiles = await model.forecast(context, HORIZON);
     const ms = performance.now() - t0;
     self.postMessage({
         type: 'forecast',
         origin,
         originDate: dateAtIndex(origin),
+        requestId,
         quantiles: Array.from(quantiles),
         nQuantiles: model.nQuantiles(),
         horizon: HORIZON,
