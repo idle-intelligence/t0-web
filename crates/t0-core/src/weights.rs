@@ -206,6 +206,45 @@ impl Weights {
         Ok(())
     }
 
+    /// Simulate The Forecasting Company's published INT8 recipe
+    /// (`theforecastingcompany/t0-beta-onnx-int8`: "96 transformer
+    /// projection matrices" per-channel signed INT8, "six input/output
+    /// projections" FP32) on top of this (F32) `Weights`. The 96 figure is
+    /// exactly `4 big matmuls/layer * 24 layers` — the same tensor set
+    /// `is_quantizable` already names for our own Q8_0/Q4_0 ladder — and the
+    /// six I/O projections are exactly the patch encoder's and decoder's
+    /// three `ResidualBlockWeights` matrices each. Everything else is left
+    /// untouched (already F32). See `crate::gguf::int8_per_channel_roundtrip`.
+    pub fn quantize_int8_theirs(&self) -> Self {
+        let mut tensors = HashMap::with_capacity(self.tensors.len());
+        for (name, (shape, data)) in &self.tensors {
+            let data = if shape.len() == 2 && is_quantizable(name) {
+                gguf::int8_per_channel_roundtrip(data, shape[0], shape[1])
+            } else {
+                data.clone()
+            };
+            tensors.insert(name.clone(), (shape.clone(), data));
+        }
+        Weights { tensors }
+    }
+
+    /// Estimated file size (bytes) if this INT8 simulation were written out
+    /// like the GGUF files (INT8 + one f32 scale/row for the 96 quantized
+    /// matrices, f16 for everything else) — no such file is ever written by
+    /// `quantize_int8_theirs`, this is purely for the drift table's "file MB"
+    /// column, labeled "estimated" there.
+    pub fn estimated_int8_theirs_bytes(&self) -> u64 {
+        let mut total = 0u64;
+        for (name, (shape, data)) in &self.tensors {
+            total += if shape.len() == 2 && is_quantizable(name) {
+                (shape[0] * shape[1] + shape[0] * 4) as u64
+            } else {
+                (data.len() * 2) as u64
+            };
+        }
+        total
+    }
+
     fn raw(&self, name: &str) -> Result<&(Vec<usize>, Vec<f32>)> {
         self.tensors.get(name).ok_or_else(|| anyhow!("missing tensor: {name}"))
     }
