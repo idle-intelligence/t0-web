@@ -95,3 +95,45 @@ Analysis: `docs/runs/2026-09-19-milestone1a.md`.
 | wgpu (Metal) | Q4_0 | 1000 | 58.6 | — | fails, see `docs/runs/2026-09-19-milestone1a.md` |
 
 Analysis: `docs/runs/2026-09-19-milestone1a.md`.
+
+## Milestone 1a — chunked wgpu batch (native, Metal), extends the table above
+
+- Machine: Apple M2 (Darwin 25.3.0), GPU idle (`ps -A -o comm | grep -E 'target/release/(jacobi|llm-life)'` empty before each run).
+- Commit: `d11f154` + this run's uncommitted changes (`forecast_batch_chunked`, `DEFAULT_BATCH_CHUNK = 16`).
+- Correctness gate: `cargo test -p t0-cli --release --no-default-features --features wgpu -- --ignored chunked_batch_of_40_equals_40_single` — 40 synthetic signals run through wgpu in chunks of 16 (3 chunks: 16+16+8) match 40 single-signal (chunk=1) forecasts to <=1e-5 max-abs. Result: **PASS**.
+- Command (per row): `t0-cli bench --weights <F32 safetensors | GGUF> [--config <config.json>] --backend wgpu --signals <N> --context 512 --horizon 96 --reps 3 --chunk 16`.
+
+| backend | quant | signals | chunk | median forward s | per-signal ms |
+|---|---|---|---|---|---|
+| wgpu (Metal) | F32 | 100 | 16 | 3.827 | 38.27 |
+| wgpu (Metal) | f16 | 100 | 16 | 3.806 | 38.06 |
+| wgpu (Metal) | Q8_0 | 100 | 16 | 3.834 | 38.34 |
+| wgpu (Metal) | Q4_0 | 100 | 16 | 3.808 | 38.08 |
+| wgpu (Metal) | F32 | 1000 | 16 | 37.989 | 37.99 |
+| wgpu (Metal) | f16 | 1000 | 16 | 46.496 | 46.50 |
+| wgpu (Metal) | Q8_0 | 1000 | 16 | 51.183 | 51.18 |
+| wgpu (Metal) | Q4_0 | 1000 | 16 | 50.200 | 50.20 |
+
+Per-signal ms is flat (~38ms) at n=100 across all quant schemes (compute stays F32 regardless of storage quant, same fact as the n=1/16 rows above). At n=1000, per-signal ms rises to 38-51ms and is noisier across quant schemes (F32 38.0, f16 46.5, Q8_0 51.2, Q4_0 50.2 ms/signal) — read as chunk-count/thermal noise (63 sequential chunks vs 7 at n=100, each rep spanning 37-88s) rather than a genuine quant-dependent compute cost, consistent with this doc's existing "CPU timing noise" finding now showing up on wgpu at high chunk counts too (see `docs/runs/2026-09-19-milestone1a.md`).
+
+Analysis and the upstream cubek-matmul issue note: `docs/runs/2026-09-19-milestone1a.md`.
+
+## Milestone 1a+ — drift benchmark, apples to apples with the published INT8 card
+
+- Machine: Apple M2 (Darwin 25.3.0), ndarray backend (drift is a numerics check, not a wgpu benchmark — the CLI's `drift` subcommand has no `--backend` flag, see `docs/runs/2026-09-19-milestone1a.md`).
+- Commit: this run's uncommitted changes (`t0-cli drift`, `Weights::quantize_int8_theirs`, `gguf::int8_per_channel_roundtrip`).
+- Reference: our F32 forward pass (== PyTorch by the Milestone-0 parity gate, worst case 1.2e-6 max-abs).
+- Command (per row): `t0-cli export-gguf --weights model.safetensors --config config.json --quant <f16|q8_0|q4_0> --out t0-alpha-<q>.gguf`, then `t0-cli drift --weights-f32 model.safetensors --config config.json --quant <t0-alpha-<q>.gguf | int8-theirs> --cases 54 --seed 42`.
+- Case generator, cases, formula: **not** their published generator (not public — see `docs/reports/t0-published-numbers.md`); our own reconstruction, documented in full in `docs/runs/2026-09-19-milestone1a.md`. Drift formula matches their card verbatim: `|error| / (max(reference) - min(reference))` over the whole forecast (horizon x quantiles), reference = our F32 output for that case.
+
+| quant | mean drift worst % | mean drift mean % | point drift worst % | point drift mean % | file MB |
+|---|---|---|---|---|---|
+| f16 | 0.0336 | 0.0111 | 0.1297 | 0.0412 | 203.3 |
+| q8_0 | 0.5299 | 0.1076 | 1.7833 | 0.3892 | 108.9 |
+| q4_0 | 3.1084 | 1.3816 | 8.4192 | 4.8130 | 58.6 |
+| int8-theirs (per-channel INT8, 96 matmuls; 6 I/O projections FP32) | 0.8494 | 0.1774 | 2.0400 | 0.6083 | 103.3 (estimated, no file written) |
+| **their published t0-beta INT8** (`t0-beta-onnx-int8`, different checkpoint: t0-beta not t0-alpha, different case generator) | **0.2271** | — | **9.393** | — | 269.1 |
+
+Their number is for **t0-beta** (256M params, embed_dim 1024); ours here is **t0-alpha** (102M params, embed_dim 512) — the two checkpoints are not architecture-identical (see `docs/reports/t0-published-numbers.md`), so this is not yet a same-model apples-to-apples row; it is the closest available until t0-beta is ported (GOAL.md's open question on which checkpoint to claim against). `int8-theirs` (their recipe, our checkpoint, our case generator) is our best current apples-to-apples proxy for the *recipe*: worst-case mean drift 0.8494% is above their 0.2271% but with a different model size and a different (undocumented, hence reconstructed) case generator, so this gap should not be read as "our INT8 recipe is worse" — it may equally reflect t0-alpha's smaller embed_dim (512 vs 1024) being more sensitive to per-channel quantization, or a harder case distribution. Q4_0 clearly exceeds their 2%/10% acceptance gates; Q8_0 and int8-theirs are within both gates; f16 is far inside both.
+
+Analysis: `docs/runs/2026-09-19-milestone1a.md`.
