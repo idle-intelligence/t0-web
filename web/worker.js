@@ -11,13 +11,14 @@
  *
  *   Worker -> Main:
  *     { type: 'status', text: string }
- *     { type: 'ready', series, modelBytes, loadMs, nQuantiles, contextCap, horizon }
- *     { type: 'forecast', origin, quantiles, nQuantiles, ms }
+ *     { type: 'ready', series, seriesName, startDate, freq, modelBytes, loadMs, nQuantiles, contextCap, horizon }
+ *     { type: 'forecast', origin, originDate, quantiles, nQuantiles, ms }
  *     { type: 'error', message: string }
  */
 
 const MODEL_URL = new URL('./models/t0-alpha-q8_0.gguf', import.meta.url).href;
 const SERIES_URL = new URL('./data/series.f32', import.meta.url).href;
+const SERIES_META_URL = new URL('./data/series_meta.json', import.meta.url).href;
 const CACHE_NAME = 't0-model-v1';
 
 // Context is capped at the same 512 used by docs/BENCHMARKS.md's latency
@@ -29,6 +30,15 @@ const HORIZON = 32;
 let t0wasm = null;
 let model = null;
 let series = null;
+let seriesMeta = null;
+
+// freq is always 'D' for this bundled series (us_births) -- date-per-index
+// is start_date + index days, no calendar-skip frequencies supported here.
+function dateAtIndex(i) {
+    const start = new Date(seriesMeta.start_date.replace(' ', 'T') + 'Z');
+    const d = new Date(start.getTime() + i * 86400000);
+    return d.toISOString().slice(0, 10);
+}
 
 self.onmessage = async (e) => {
     const { type, ...data } = e.data;
@@ -102,17 +112,24 @@ async function handleLoad() {
     self.postMessage({ type: 'status', text: 'Loading series...' });
     const seriesBuf = await fetch(SERIES_URL).then((r) => r.arrayBuffer());
     series = new Float32Array(seriesBuf);
+    seriesMeta = await fetch(SERIES_META_URL).then((r) => r.json());
 
     self.postMessage({
         type: 'ready',
         series: Array.from(series),
+        seriesName: seriesMeta.name,
+        startDate: seriesMeta.start_date,
+        freq: seriesMeta.freq,
         modelBytes: modelBuf.byteLength,
         loadMs,
         nQuantiles: model.nQuantiles(),
         contextCap: CONTEXT_CAP,
         horizon: HORIZON,
     });
-    self.postMessage({ type: 'status', text: 'Ready' });
+    self.postMessage({
+        type: 'status',
+        text: `Ready — series: ${seriesMeta.name} (${seriesMeta.n_points} points, ${seriesMeta.start_date.slice(0, 10)} to ${dateAtIndex(seriesMeta.n_points - 1)})`,
+    });
 }
 
 function handleForecast(origin) {
@@ -128,6 +145,7 @@ function handleForecast(origin) {
     self.postMessage({
         type: 'forecast',
         origin,
+        originDate: dateAtIndex(origin),
         quantiles: Array.from(quantiles),
         nQuantiles: model.nQuantiles(),
         horizon: HORIZON,

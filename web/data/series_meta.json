@@ -1,0 +1,8 @@
+{
+  "name": "us_births",
+  "source": "GIFT-Eval (Salesforce/GiftEval on HuggingFace Hub), config us_births/D",
+  "origin_dataset": "Monash Time Series Forecasting Archive, 'us_births' (daily US births, 1969-01-01 to 1988-12-31)",
+  "start_date": "1969-01-01 00:00:00",
+  "freq": "D",
+  "n_points": 7305
+}

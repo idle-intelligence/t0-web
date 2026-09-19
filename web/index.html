@@ -207,10 +207,10 @@
     <section>
         <h2>INPUT <span class="sub">· forecast origin</span></h2>
         <div class="controls">
-            <input type="range" id="originSlider" min="64" max="608" step="8" value="400" disabled>
-            <span id="originLabel">t = 400</span>
+            <input type="range" id="originSlider" min="64" max="7273" step="1" value="3600" disabled>
+            <span id="originLabel">t = 3600</span>
         </div>
-        <p class="info">A bundled synthetic daily-like series (640 points, deterministic, <a href="../tools/make_web_demo_series.py">tools/make_web_demo_series.py</a>). Moving the slider re-forecasts 32 steps ahead from that point.</p>
+        <p class="info" id="seriesInfo">Real daily series: US births, 1969-01-01 to 1988-12-31 (7305 points, <a href="./data/README.md">source + license</a>). Moving the slider re-forecasts 32 steps ahead from that date.</p>
     </section>
 
     <section>
@@ -279,6 +279,14 @@
         let horizon = 32;
         let nQuantiles = 5;
         let lastForecast = null;
+        let seriesStartDate = null;
+
+        function originDate(i) {
+            if (!seriesStartDate) return null;
+            const start = new Date(seriesStartDate.replace(' ', 'T') + 'Z');
+            const d = new Date(start.getTime() + i * 86400000);
+            return d.toISOString().slice(0, 10);
+        }
 
         window.__app = {
             ready: false,
@@ -362,7 +370,7 @@
 
         function onOriginChange() {
             const origin = parseInt(originSlider.value, 10);
-            originLabel.textContent = `t = ${origin}`;
+            originLabel.textContent = originDate ? `${originDate(origin)}` : `t = ${origin}`;
             draw(origin, lastForecast && lastForecast.origin === origin ? lastForecast : null);
             worker.postMessage({ type: 'forecast', origin });
         }
@@ -381,11 +389,13 @@
                     contextCap = msg.contextCap;
                     horizon = msg.horizon;
                     nQuantiles = msg.nQuantiles;
+                    seriesStartDate = msg.startDate;
                     originSlider.max = series.length - horizon;
                     originSlider.disabled = false;
                     metricsCard.style.display = 'block';
                     metricSize.textContent = formatBytes(msg.modelBytes);
                     metricBackend.textContent = 'wasm/ndarray';
+                    logLine(`Series: ${msg.seriesName} (${series.length} points, ${msg.startDate.slice(0, 10)} to ${originDate(series.length - 1)})`);
                     logLine(`Model loaded in ${msg.loadMs.toFixed(0)} ms (${formatBytes(msg.modelBytes)}, ${msg.nQuantiles} quantiles)`);
                     updateStatus('ready', 'Ready');
                     window.__app.ready = true;
@@ -396,7 +406,7 @@
                     lastForecast = msg;
                     window.__app.lastForecast = msg;
                     metricMs.textContent = msg.ms.toFixed(1);
-                    logLine(`Forecast at t=${msg.origin}: ${msg.ms.toFixed(1)} ms`);
+                    logLine(`Forecast origin ${msg.originDate || 't=' + msg.origin}: ${msg.ms.toFixed(1)} ms`);
                     const origin = parseInt(originSlider.value, 10);
                     if (origin === msg.origin) draw(origin, msg);
                     break;
