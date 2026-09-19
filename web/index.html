@@ -83,6 +83,11 @@
             gap: 8px;
             font-size: 14px;
         }
+        #statusLine1 {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
         .status-dot {
             width: 6px;
             height: 6px;
@@ -101,17 +106,37 @@
             0%, 100% { opacity: 1; }
             50% { opacity: 0.4; }
         }
+        #statusLine2 {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 12px;
+            color: var(--faint);
+            margin-top: 4px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        #logToggle {
+            display: inline-block;
+            margin-top: 6px;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 11px;
+            color: var(--faint);
+            background: none;
+            border: none;
+            padding: 0;
+            cursor: pointer;
+            text-decoration: underline;
+        }
+        #logToggle:hover { color: var(--muted); }
         #statusLog {
             font-family: 'IBM Plex Mono', monospace;
             font-size: 12px;
             color: var(--faint);
-            margin-top: 8px;
-            height: 108px;
-            overflow-y: auto;
-            border: 1px solid var(--border);
-            padding: 6px 8px;
+            margin-top: 6px;
+            white-space: pre-wrap;
+            word-break: break-word;
         }
-        #statusLog div { white-space: pre-wrap; word-break: break-word; }
+        #statusLog[hidden] { display: none; }
 
         .controls {
             display: flex;
@@ -200,6 +225,14 @@
             padding-top: 24px;
             margin-top: 24px;
         }
+        footer .credit {
+            font-size: 13px;
+            color: var(--faint);
+            line-height: 1.6;
+            margin-bottom: 8px;
+        }
+        footer .credit a { text-decoration: underline; color: var(--faint); }
+        footer .credit a:hover { color: var(--muted); }
         footer a {
             font-family: 'IBM Plex Mono', monospace;
             font-size: 13px;
@@ -214,8 +247,9 @@
         <p class="org">idle intelligence</p>
         <h1>t0-web</h1>
         <p class="tagline">
-            <a href="https://huggingface.co/theforecastingcompany/t0-alpha">t0-alpha</a>
-            (Q8_0, ~109 MB) forecasting a single signal client-side, via WebAssembly
+            <a href="https://huggingface.co/theforecastingcompany/t0-alpha">t0-alpha</a>,
+            quantized to 8 bit (~109 MB), forecasting one series in your browser;
+            WebGPU when available, otherwise CPU
         </p>
         <p class="repo">
             <a href="https://github.com/idle-intelligence/t0-web">github.com/idle-intelligence/t0-web</a>
@@ -224,11 +258,15 @@
 
     <section>
         <h2>STATUS</h2>
-        <div class="status">
-            <span class="status-dot" id="statusDot"></span>
-            <span id="statusText">Initializing...</span>
+        <div id="statusFixed">
+            <div class="status">
+                <span class="status-dot" id="statusDot"></span>
+                <span id="statusLine1">Initializing...</span>
+            </div>
+            <div id="statusLine2"></div>
         </div>
-        <div id="statusLog"></div>
+        <button id="logToggle" type="button">show log</button>
+        <pre id="statusLog" hidden></pre>
     </section>
 
     <section>
@@ -278,13 +316,20 @@
     </section>
 
     <footer>
+        <p class="credit">
+            Model: <a href="https://huggingface.co/theforecastingcompany/t0-alpha">t0-alpha</a>
+            by <a href="https://www.theforecastingcompany.ai">The Forecasting Company</a>, Apache-2.0.
+            Custom Rust inference compiled to WebAssembly.
+        </p>
         <a href="https://idleintelligence.org">idleintelligence.org</a>
     </footer>
 
     <script type="module">
         const statusDot = document.getElementById('statusDot');
-        const statusText = document.getElementById('statusText');
+        const statusLine1 = document.getElementById('statusLine1');
+        const statusLine2 = document.getElementById('statusLine2');
         const statusLog = document.getElementById('statusLog');
+        const logToggle = document.getElementById('logToggle');
         const originSlider = document.getElementById('originSlider');
         const originLabel = document.getElementById('originLabel');
         const chartCanvas = document.getElementById('chart');
@@ -301,36 +346,50 @@
 
         const WINDOW_CONTEXT = 160; // chart displays this many context points before the origin
 
-        function updateStatus(state, text) {
+        // STATUS is exactly two fixed-height lines: line 1 is the current
+        // state (loading phase, then "model loaded (...), backend X,
+        // origin Y" once ready, re-rendered whenever the origin changes),
+        // line 2 is the last event with its time, replaced on each event.
+        // The full history is a plain <pre>, collapsed by default behind a
+        // "show log"/"hide log" toggle, no inner scrollbar -- keyed entries
+        // (forecast timing, download %, ...) still update in place there.
+        let modelInfo = null; // { sizeStr, backend } -- set once, at 'ready'
+        function setDot(state) {
             statusDot.className = 'status-dot ' + state;
-            statusText.textContent = text;
+        }
+        function setLine1(text) {
+            statusLine1.textContent = text;
+        }
+        function renderStateLine() {
+            if (!modelInfo) return;
+            setLine1(`model loaded (Q8_0, ${modelInfo.sizeStr}), backend ${modelInfo.backend}, origin ${originDateStr(origin)}`);
         }
 
-        // STATUS log: a line with a `key` is updated in place on repeat
-        // (forecast timing, download %, ...); a line with no key (or a new
-        // key) always appends. Fixed-height scrollable box, capped at 200
-        // lines, newest at the bottom.
-        const logKeyToEl = new Map();
-        const logLinesOrder = [];
+        const logEntries = []; // { key, text } -- text already timestamped, capped at 200
         function logLine(text, key) {
-            const stamp = `[${new Date().toISOString().slice(11, 19)}] ${text}`;
-            if (key && logKeyToEl.has(key)) {
-                logKeyToEl.get(key).textContent = stamp;
-                statusLog.scrollTop = statusLog.scrollHeight;
-                return;
+            const stamp = `${new Date().toISOString().slice(11, 19)} ${text}`;
+            statusLine2.textContent = stamp;
+            if (key) {
+                const existing = logEntries.find((e) => e.key === key);
+                if (existing) {
+                    existing.text = stamp;
+                    renderLog();
+                    return;
+                }
             }
-            const el = document.createElement('div');
-            el.textContent = stamp;
-            statusLog.appendChild(el);
-            logLinesOrder.push(el);
-            if (key) logKeyToEl.set(key, el);
-            if (logLinesOrder.length > 200) {
-                const old = logLinesOrder.shift();
-                for (const [k, v] of logKeyToEl) if (v === old) logKeyToEl.delete(k);
-                old.remove();
-            }
-            statusLog.scrollTop = statusLog.scrollHeight;
+            logEntries.push({ key, text: stamp });
+            if (logEntries.length > 200) logEntries.shift();
+            renderLog();
         }
+        function renderLog() {
+            statusLog.textContent = logEntries.map((e) => e.text).join('\n');
+        }
+
+        logToggle.addEventListener('click', () => {
+            const wasHidden = statusLog.hidden;
+            statusLog.hidden = !wasHidden;
+            logToggle.textContent = wasHidden ? 'hide log' : 'show log';
+        });
 
         function formatBytes(bytes) {
             const mb = bytes / (1024 * 1024);
@@ -377,7 +436,10 @@
                 commitOrigin(i);
             },
             logLineCount() {
-                return logLinesOrder.length;
+                return logEntries.length;
+            },
+            statusBlockHeight() {
+                return document.getElementById('statusFixed').getBoundingClientRect().height;
             },
         };
 
@@ -588,6 +650,7 @@
             lastForecast = null;
             originSlider.value = origin;
             originLabel.textContent = originDateStr(origin);
+            renderStateLine();
             drawAll();
             updateMetrics();
             scheduleForecast(origin);
@@ -641,7 +704,8 @@
             const msg = e.data;
             switch (msg.type) {
                 case 'status':
-                    updateStatus('loading', msg.text);
+                    setDot('loading');
+                    if (!modelInfo) setLine1(msg.text);
                     logLine(msg.text, msg.key);
                     break;
                 case 'ready': {
@@ -654,9 +718,10 @@
                     metricsCard.style.display = 'block';
                     metricSize.textContent = formatBytes(msg.modelBytes);
                     metricBackend.textContent = msg.backend;
-                    updateStatus('ready', 'Ready');
+                    modelInfo = { sizeStr: formatBytes(msg.modelBytes), backend: msg.backend };
+                    setDot('ready');
                     window.__app.ready = true;
-                    commitOrigin(origin);
+                    commitOrigin(origin); // also calls renderStateLine()
                     break;
                 }
                 case 'forecast': {
@@ -664,7 +729,7 @@
                     lastForecast = msg;
                     window.__app.lastForecast = msg;
                     window.__app.forecastCount += 1;
-                    logLine(`Forecast origin ${msg.originDate}: ${msg.ms.toFixed(1)} ms`, 'forecast');
+                    logLine(`forecast ${msg.ms.toFixed(0)} ms`, 'forecast');
                     if (msg.origin === origin) {
                         drawAll();
                         updateMetrics();
@@ -672,7 +737,8 @@
                     break;
                 }
                 case 'error':
-                    updateStatus('error', 'Error: ' + msg.message);
+                    setDot('error');
+                    setLine1('Error: ' + msg.message);
                     logLine('ERROR: ' + msg.message);
                     console.error(msg.message);
                     break;
@@ -681,7 +747,8 @@
             }
         };
 
-        updateStatus('loading', 'Loading...');
+        setDot('loading');
+        setLine1('Loading...');
         worker.postMessage({ type: 'load' });
     </script>
 </body>

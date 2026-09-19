@@ -10,6 +10,8 @@
 //   4. moving the origin slider without releasing it ('input' events only)
 //      does not grow the STATUS log line count (repeated forecast/download
 //      lines update in place; only genuine state changes append).
+//   5. the STATUS block (two fixed lines, collapsed log) has constant
+//      height across 20 forecasts at different origins.
 //
 // Backend is auto-selected by web/worker.js (WebGPU if navigator.gpu
 // exists, else WASM CPU/burn-ndarray) -- this bundled Chromium-for-Testing
@@ -166,6 +168,23 @@ async function main() {
     console.log(`slider drag (input only): log lines ${logBefore} -> ${logAfter}`);
     if (logAfter !== logBefore) {
       throw new Error(`slider 'input' events grew the log (${logBefore} -> ${logAfter}), expected no change`);
+    }
+
+    // --- STATUS block height must stay constant across 20 forecasts ---
+    const heightBefore = await page.evaluate(() => window.__app.statusBlockHeight());
+    const lo = parseInt(await page.evaluate(() => document.getElementById('originSlider').min), 10);
+    const hi = parseInt(await page.evaluate(() => document.getElementById('originSlider').max), 10);
+    const heights = [heightBefore];
+    for (let i = 0; i < 20; i++) {
+      const o = lo + Math.floor(((hi - lo) * i) / 19);
+      await page.evaluate((oo) => window.__app.setOrigin(oo), o);
+      await waitForForecast(page, o);
+      heights.push(await page.evaluate(() => window.__app.statusBlockHeight()));
+    }
+    const minH = Math.min(...heights), maxH = Math.max(...heights);
+    console.log(`status block height over 20 forecasts: ${minH.toFixed(1)}-${maxH.toFixed(1)}px`);
+    if (maxH - minH > 0.5) {
+      throw new Error(`STATUS block height varied (${minH.toFixed(1)}-${maxH.toFixed(1)}px) across 20 forecasts`);
     }
 
     report.pass = true;
