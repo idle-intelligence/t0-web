@@ -186,3 +186,20 @@ Forecast agreement sanity (ours F32 vs reference, 9-level interpolated quantiles
 What was not run: wgpu backend (GPU contended by `llm-life` all session — see machine line above); the officially published 8192-context / no-subsampling / full-97-config protocol (blocked on this port's autoregressive rollout, not yet implemented); single-signal native/browser latency per quant (GOAL.md's next item); the t0.run "Forecast all" timing reference measurement.
 
 Analysis: `docs/runs/2026-09-19-gifteval-subset.md`.
+
+## Single-signal latency (native CPU, M2)
+
+- Machine: Apple M2 (Darwin 25.3.0), `ndarray` backend, GPU occupied by `llm-life train-a` throughout — wgpu/browser rows pending.
+- Commit: `01257dc`.
+- Command: `t0-cli bench --weights <F32|GGUF> [--config config.json] --backend ndarray --signals 1 --context 512 --horizon 32 --warmup 2 --reps 10` — median of 10 after 2 warm-ups.
+
+| quant | file MB | load time (s) | median forward latency (ms) |
+|---|---|---|---|
+| F32 | 406.6 | 0.669 | 363.2 |
+| f16 (load-time cast) | 203.3 | 0.799 | 419.9 |
+| Q8_0 | 108.9 | 0.543 | 398.0 |
+| Q4_0 | 58.6 | 0.362 | 424.2 |
+| wgpu (Metal), all quants | — | — | pending (GPU busy) |
+| WebGPU (browser), all quants | — | — | pending (GPU busy) |
+
+Analysis: `docs/runs/2026-09-19-latency-cpu.md`.
