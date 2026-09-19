@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>t0-web — idle intelligence</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #fdfdfd;
+            --text: #1a1a1a;
+            --muted: #555;
+            --faint: #999;
+            --border: #ddd;
+            --green: #2d7d46;
+            --yellow: #b58900;
+            --red: #c0392b;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'IBM Plex Sans', -apple-system, sans-serif;
+            max-width: 640px;
+            margin: 0 auto;
+            padding: 48px 24px 96px;
+            color: var(--text);
+            background: var(--bg);
+            line-height: 1.5;
+            font-size: 15px;
+        }
+        a { color: var(--text); }
+        a:hover { color: var(--muted); }
+
+        header { margin-bottom: 48px; }
+        .org {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 13px;
+            color: var(--muted);
+            letter-spacing: 0.02em;
+            margin-bottom: 2px;
+        }
+        h1 {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 24px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+        .tagline {
+            color: var(--muted);
+            font-size: 14px;
+            line-height: 1.6;
+        }
+        .tagline a { text-decoration: underline; color: var(--muted); }
+        .tagline a:hover { color: var(--text); }
+        .repo {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 13px;
+            margin-top: 4px;
+        }
+        .repo a { color: var(--faint); text-decoration: none; }
+        .repo a:hover { color: var(--muted); }
+
+        section {
+            border-top: 1px solid var(--border);
+            padding: 24px 0;
+        }
+        section h2 {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 12px;
+            font-weight: 500;
+            letter-spacing: 0.04em;
+            color: var(--faint);
+            margin-bottom: 12px;
+        }
+        section h2 .sub {
+            font-weight: 400;
+        }
+
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+        }
+        .status-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--faint);
+            flex-shrink: 0;
+        }
+        .status-dot.loading { background: var(--yellow); }
+        .status-dot.ready { background: var(--green); }
+        .status-dot.error { background: var(--red); }
+        .status-dot.generating {
+            background: var(--text);
+            animation: pulse 1s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+        #statusLog {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 12px;
+            color: var(--faint);
+            margin-top: 8px;
+            white-space: pre-line;
+        }
+
+        .controls {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        input[type="range"] {
+            flex: 1;
+        }
+        #originLabel {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 13px;
+            color: var(--muted);
+            min-width: 90px;
+            text-align: right;
+        }
+        .info {
+            font-size: 13px;
+            color: var(--faint);
+            margin-top: 12px;
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            border: 1px solid var(--border);
+            background: var(--bg);
+        }
+        .legend {
+            display: flex;
+            gap: 16px;
+            margin-top: 8px;
+            font-size: 12px;
+            color: var(--faint);
+            font-family: 'IBM Plex Mono', monospace;
+        }
+        .legend span { display: flex; align-items: center; gap: 4px; }
+        .swatch { display: inline-block; width: 12px; height: 3px; }
+
+        #metricsCard { display: none; }
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+        }
+        .metric { text-align: center; }
+        .metric-value {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 16px;
+            font-weight: 600;
+        }
+        .metric-label {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 11px;
+            color: var(--faint);
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            margin-top: 2px;
+        }
+
+        footer {
+            border-top: 1px solid var(--border);
+            padding-top: 24px;
+            margin-top: 24px;
+        }
+        footer a {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 13px;
+            color: var(--faint);
+            text-decoration: none;
+        }
+        footer a:hover { color: var(--muted); }
+    </style>
+</head>
+<body>
+    <header>
+        <p class="org">idle intelligence</p>
+        <h1>t0-web</h1>
+        <p class="tagline">
+            <a href="https://huggingface.co/theforecastingcompany/t0-alpha">t0-alpha</a>
+            (Q8_0, ~109 MB) forecasting a single signal client-side, CPU (burn-ndarray) via WebAssembly
+        </p>
+        <p class="repo">
+            <a href="https://github.com/idle-intelligence/t0-web">github.com/idle-intelligence/t0-web</a>
+        </p>
+    </header>
+
+    <section>
+        <h2>STATUS</h2>
+        <div class="status">
+            <span class="status-dot" id="statusDot"></span>
+            <span id="statusText">Initializing...</span>
+        </div>
+        <div id="statusLog"></div>
+    </section>
+
+    <section>
+        <h2>INPUT <span class="sub">· forecast origin</span></h2>
+        <div class="controls">
+            <input type="range" id="originSlider" min="64" max="608" step="8" value="400" disabled>
+            <span id="originLabel">t = 400</span>
+        </div>
+        <p class="info">A bundled synthetic daily-like series (640 points, deterministic, <a href="../tools/make_web_demo_series.py">tools/make_web_demo_series.py</a>). Moving the slider re-forecasts 32 steps ahead from that point.</p>
+    </section>
+
+    <section>
+        <h2>OUTPUT <span class="sub">· forecast fan</span></h2>
+        <canvas id="chart" width="1184" height="480"></canvas>
+        <div class="legend">
+            <span><span class="swatch" style="background:#1a1a1a"></span>context</span>
+            <span><span class="swatch" style="background:#c7c7c7"></span>actual future</span>
+            <span><span class="swatch" style="background:#2d7d46"></span>median forecast</span>
+            <span><span class="swatch" style="background:#a9d4b6"></span>10–90% band</span>
+        </div>
+    </section>
+
+    <section id="metricsCard">
+        <h2>PERFORMANCE</h2>
+        <div class="metrics-grid">
+            <div class="metric">
+                <div class="metric-value" id="metricMs">—</div>
+                <div class="metric-label">MS / FORECAST</div>
+            </div>
+            <div class="metric">
+                <div class="metric-value" id="metricSize">—</div>
+                <div class="metric-label">MODEL SIZE</div>
+            </div>
+            <div class="metric">
+                <div class="metric-value" id="metricBackend">—</div>
+                <div class="metric-label">BACKEND</div>
+            </div>
+        </div>
+    </section>
+
+    <footer>
+        <a href="https://idleintelligence.org">idleintelligence.org</a>
+    </footer>
+
+    <script type="module">
+        const statusDot = document.getElementById('statusDot');
+        const statusText = document.getElementById('statusText');
+        const statusLog = document.getElementById('statusLog');
+        const originSlider = document.getElementById('originSlider');
+        const originLabel = document.getElementById('originLabel');
+        const canvas = document.getElementById('chart');
+        const ctx2d = canvas.getContext('2d');
+        const metricsCard = document.getElementById('metricsCard');
+        const metricMs = document.getElementById('metricMs');
+        const metricSize = document.getElementById('metricSize');
+        const metricBackend = document.getElementById('metricBackend');
+
+        function updateStatus(state, text) {
+            statusDot.className = 'status-dot ' + state;
+            statusText.textContent = text;
+        }
+        function logLine(text) {
+            const line = `[${new Date().toISOString().slice(11, 19)}] ${text}`;
+            statusLog.textContent = statusLog.textContent ? statusLog.textContent + '\n' + line : line;
+        }
+        function formatBytes(bytes) {
+            const mb = bytes / (1024 * 1024);
+            return `${mb.toFixed(1)} MB`;
+        }
+
+        const worker = new Worker('./worker.js', { type: 'module' });
+
+        let series = null;
+        let contextCap = 512;
+        let horizon = 32;
+        let nQuantiles = 5;
+        let lastForecast = null;
+
+        window.__app = {
+            ready: false,
+            lastForecast: null,
+            setOrigin(i) {
+                originSlider.value = i;
+                onOriginChange();
+            },
+        };
+
+        function draw(origin, forecast) {
+            const w = canvas.width, h = canvas.height;
+            ctx2d.clearRect(0, 0, w, h);
+            if (!series) return;
+
+            const forecastValues = forecast ? forecast.quantiles : [];
+            let lo = Math.min(...series);
+            let hi = Math.max(...series);
+            for (const v of forecastValues) {
+                lo = Math.min(lo, v);
+                hi = Math.max(hi, v);
+            }
+            const pad = (hi - lo) * 0.1 || 1;
+            lo -= pad; hi += pad;
+
+            const n = series.length;
+            const xAt = (i) => (i / (n - 1)) * w;
+            const yAt = (v) => h - ((v - lo) / (hi - lo)) * h;
+
+            // actual future (faint), full series beyond origin
+            ctx2d.strokeStyle = '#c7c7c7';
+            ctx2d.lineWidth = 1.5;
+            ctx2d.setLineDash([4, 3]);
+            ctx2d.beginPath();
+            for (let i = origin; i < n; i++) {
+                const x = xAt(i), y = yAt(series[i]);
+                if (i === origin) ctx2d.moveTo(x, y); else ctx2d.lineTo(x, y);
+            }
+            ctx2d.stroke();
+            ctx2d.setLineDash([]);
+
+            // context (solid, up to origin)
+            ctx2d.strokeStyle = '#1a1a1a';
+            ctx2d.lineWidth = 1.75;
+            ctx2d.beginPath();
+            for (let i = 0; i <= origin; i++) {
+                const x = xAt(i), y = yAt(series[i]);
+                if (i === 0) ctx2d.moveTo(x, y); else ctx2d.lineTo(x, y);
+            }
+            ctx2d.stroke();
+
+            if (forecast) {
+                const { quantiles, horizon: hZ, nQuantiles: nq } = forecast;
+                const q = (t, qi) => quantiles[t * nq + qi];
+                // 10-90 band (quantile index 0 == 0.1, nq-1 == 0.9)
+                ctx2d.fillStyle = 'rgba(45, 125, 70, 0.18)';
+                ctx2d.beginPath();
+                for (let t = 0; t < hZ; t++) ctx2d.lineTo(xAt(origin + t), yAt(q(t, 0)));
+                for (let t = hZ - 1; t >= 0; t--) ctx2d.lineTo(xAt(origin + t), yAt(q(t, nq - 1)));
+                ctx2d.closePath();
+                ctx2d.fill();
+
+                // median (middle quantile index)
+                const mid = Math.floor(nq / 2);
+                ctx2d.strokeStyle = '#2d7d46';
+                ctx2d.lineWidth = 2;
+                ctx2d.beginPath();
+                ctx2d.moveTo(xAt(origin), yAt(series[origin]));
+                for (let t = 0; t < hZ; t++) ctx2d.lineTo(xAt(origin + t), yAt(q(t, mid)));
+                ctx2d.stroke();
+            }
+
+            // origin marker
+            ctx2d.strokeStyle = '#999';
+            ctx2d.lineWidth = 1;
+            ctx2d.beginPath();
+            ctx2d.moveTo(xAt(origin), 0);
+            ctx2d.lineTo(xAt(origin), h);
+            ctx2d.stroke();
+        }
+
+        function onOriginChange() {
+            const origin = parseInt(originSlider.value, 10);
+            originLabel.textContent = `t = ${origin}`;
+            draw(origin, lastForecast && lastForecast.origin === origin ? lastForecast : null);
+            worker.postMessage({ type: 'forecast', origin });
+        }
+
+        originSlider.addEventListener('input', onOriginChange);
+
+        worker.onmessage = (e) => {
+            const msg = e.data;
+            switch (msg.type) {
+                case 'status':
+                    updateStatus('loading', msg.text);
+                    logLine(msg.text);
+                    break;
+                case 'ready': {
+                    series = msg.series;
+                    contextCap = msg.contextCap;
+                    horizon = msg.horizon;
+                    nQuantiles = msg.nQuantiles;
+                    originSlider.max = series.length - horizon;
+                    originSlider.disabled = false;
+                    metricsCard.style.display = 'block';
+                    metricSize.textContent = formatBytes(msg.modelBytes);
+                    metricBackend.textContent = 'wasm/ndarray';
+                    logLine(`Model loaded in ${msg.loadMs.toFixed(0)} ms (${formatBytes(msg.modelBytes)}, ${msg.nQuantiles} quantiles)`);
+                    updateStatus('ready', 'Ready');
+                    window.__app.ready = true;
+                    onOriginChange();
+                    break;
+                }
+                case 'forecast': {
+                    lastForecast = msg;
+                    window.__app.lastForecast = msg;
+                    metricMs.textContent = msg.ms.toFixed(1);
+                    logLine(`Forecast at t=${msg.origin}: ${msg.ms.toFixed(1)} ms`);
+                    const origin = parseInt(originSlider.value, 10);
+                    if (origin === msg.origin) draw(origin, msg);
+                    break;
+                }
+                case 'error':
+                    updateStatus('error', 'Error: ' + msg.message);
+                    logLine('ERROR: ' + msg.message);
+                    console.error(msg.message);
+                    break;
+                default:
+                    console.warn('[main] unknown message type:', msg.type);
+            }
+        };
+
+        updateStatus('loading', 'Loading...');
+        worker.postMessage({ type: 'load' });
+    </script>
+</body>
+</html>
