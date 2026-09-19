@@ -106,8 +106,12 @@
             font-size: 12px;
             color: var(--faint);
             margin-top: 8px;
-            white-space: pre-line;
+            height: 108px;
+            overflow-y: auto;
+            border: 1px solid var(--border);
+            padding: 6px 8px;
         }
+        #statusLog div { white-space: pre-wrap; word-break: break-word; }
 
         .controls {
             display: flex;
@@ -133,19 +137,42 @@
         canvas {
             display: block;
             width: 100%;
+        }
+        #chart {
+            height: 320px;
             border: 1px solid var(--border);
             background: var(--bg);
+            cursor: crosshair;
+            touch-action: none;
+        }
+        #strip {
+            height: 40px;
+            margin-top: 6px;
+            border: 1px solid var(--border);
+            cursor: pointer;
+            touch-action: none;
         }
         .legend {
             display: flex;
-            gap: 16px;
-            margin-top: 8px;
+            justify-content: space-between;
+            align-items: baseline;
+            flex-wrap: wrap;
+            gap: 8px 16px;
+            margin-top: 10px;
             font-size: 12px;
-            color: var(--faint);
+            color: var(--muted);
             font-family: 'IBM Plex Mono', monospace;
         }
-        .legend span { display: flex; align-items: center; gap: 4px; }
-        .swatch { display: inline-block; width: 12px; height: 3px; }
+        .legend .left span, .legend .right span { margin-right: 12px; }
+        .legend .left span:last-child, .legend .right span:last-child { margin-right: 0; }
+        .swatch-line { color: var(--text); }
+        .swatch-line.forecast { color: #666; }
+        .swatch-box { color: #bbb; }
+        .hint {
+            font-size: 12px;
+            color: var(--faint);
+            margin-top: 6px;
+        }
 
         #metricsCard { display: none; }
         .metrics-grid {
@@ -188,7 +215,7 @@
         <h1>t0-web</h1>
         <p class="tagline">
             <a href="https://huggingface.co/theforecastingcompany/t0-alpha">t0-alpha</a>
-            (Q8_0, ~109 MB) forecasting a single signal client-side, CPU (burn-ndarray) via WebAssembly
+            (Q8_0, ~109 MB) forecasting a single signal client-side, via WebAssembly
         </p>
         <p class="repo">
             <a href="https://github.com/idle-intelligence/t0-web">github.com/idle-intelligence/t0-web</a>
@@ -210,18 +237,26 @@
             <input type="range" id="originSlider" min="64" max="7273" step="1" value="3600" disabled>
             <span id="originLabel">t = 3600</span>
         </div>
-        <p class="info" id="seriesInfo">Real daily series: US births, 1969-01-01 to 1988-12-31 (7305 points, <a href="./data/README.md">source + license</a>). Moving the slider re-forecasts 32 steps ahead from that date.</p>
+        <p class="info" id="seriesInfo">series: US births · daily (<a href="./data/README.md">source + license</a>)</p>
     </section>
 
     <section>
         <h2>OUTPUT <span class="sub">· forecast fan</span></h2>
-        <canvas id="chart" width="1184" height="480"></canvas>
+        <canvas id="chart"></canvas>
+        <canvas id="strip"></canvas>
         <div class="legend">
-            <span><span class="swatch" style="background:#1a1a1a"></span>context</span>
-            <span><span class="swatch" style="background:#c7c7c7"></span>actual future</span>
-            <span><span class="swatch" style="background:#2d7d46"></span>median forecast</span>
-            <span><span class="swatch" style="background:#a9d4b6"></span>10–90% band</span>
+            <span class="left">
+                <span><span class="swatch-line">—</span> Actual</span>
+                <span><span class="swatch-line forecast">—</span> Forecast</span>
+                <span><span class="swatch-box">▮</span> Q10–Q90</span>
+            </span>
+            <span class="right">
+                <span>MAE <span id="metricMae">—</span></span>
+                <span>sMAPE <span id="metricSmape">—</span>%</span>
+                <span>LATENCY <span id="metricLatencyInline">—</span>ms</span>
+            </span>
         </div>
+        <p class="hint">Click or drag to forecast from any point</p>
     </section>
 
     <section id="metricsCard">
@@ -252,21 +287,51 @@
         const statusLog = document.getElementById('statusLog');
         const originSlider = document.getElementById('originSlider');
         const originLabel = document.getElementById('originLabel');
-        const canvas = document.getElementById('chart');
-        const ctx2d = canvas.getContext('2d');
+        const chartCanvas = document.getElementById('chart');
+        const chartCtx = chartCanvas.getContext('2d');
+        const stripCanvas = document.getElementById('strip');
+        const stripCtx = stripCanvas.getContext('2d');
         const metricsCard = document.getElementById('metricsCard');
         const metricMs = document.getElementById('metricMs');
         const metricSize = document.getElementById('metricSize');
         const metricBackend = document.getElementById('metricBackend');
+        const metricMae = document.getElementById('metricMae');
+        const metricSmape = document.getElementById('metricSmape');
+        const metricLatencyInline = document.getElementById('metricLatencyInline');
+
+        const WINDOW_CONTEXT = 160; // chart displays this many context points before the origin
 
         function updateStatus(state, text) {
             statusDot.className = 'status-dot ' + state;
             statusText.textContent = text;
         }
-        function logLine(text) {
-            const line = `[${new Date().toISOString().slice(11, 19)}] ${text}`;
-            statusLog.textContent = statusLog.textContent ? statusLog.textContent + '\n' + line : line;
+
+        // STATUS log: a line with a `key` is updated in place on repeat
+        // (forecast timing, download %, ...); a line with no key (or a new
+        // key) always appends. Fixed-height scrollable box, capped at 200
+        // lines, newest at the bottom.
+        const logKeyToEl = new Map();
+        const logLinesOrder = [];
+        function logLine(text, key) {
+            const stamp = `[${new Date().toISOString().slice(11, 19)}] ${text}`;
+            if (key && logKeyToEl.has(key)) {
+                logKeyToEl.get(key).textContent = stamp;
+                statusLog.scrollTop = statusLog.scrollHeight;
+                return;
+            }
+            const el = document.createElement('div');
+            el.textContent = stamp;
+            statusLog.appendChild(el);
+            logLinesOrder.push(el);
+            if (key) logKeyToEl.set(key, el);
+            if (logLinesOrder.length > 200) {
+                const old = logLinesOrder.shift();
+                for (const [k, v] of logKeyToEl) if (v === old) logKeyToEl.delete(k);
+                old.remove();
+            }
+            statusLog.scrollTop = statusLog.scrollHeight;
         }
+
         function formatBytes(bytes) {
             const mb = bytes / (1024 * 1024);
             return `${mb.toFixed(1)} MB`;
@@ -275,118 +340,312 @@
         const worker = new Worker('./worker.js', { type: 'module' });
 
         let series = null;
-        let contextCap = 512;
         let horizon = 32;
         let nQuantiles = 5;
-        let lastForecast = null;
         let seriesStartDate = null;
 
-        function originDate(i) {
-            if (!seriesStartDate) return null;
+        let origin = 3600;      // committed origin: drives the drawn window + forecast data
+        let markerOrigin = 3600; // visual-only during drag/preview, may differ from `origin`
+        let lastForecast = null; // forecast payload for the committed `origin`, or null while pending
+        let requestIdCounter = 0;
+        let debounceTimer = null;
+
+        function originDateStr(i) {
+            if (!seriesStartDate) return `t = ${i}`;
             const start = new Date(seriesStartDate.replace(' ', 'T') + 'Z');
             const d = new Date(start.getTime() + i * 86400000);
             return d.toISOString().slice(0, 10);
         }
 
+        function clampOrigin(o) {
+            const lo = parseInt(originSlider.min, 10);
+            const hi = series ? series.length - horizon : parseInt(originSlider.max, 10);
+            return Math.min(hi, Math.max(lo, Math.round(o)));
+        }
+
+        function windowFor(o) {
+            const start = Math.max(0, o - WINDOW_CONTEXT);
+            const end = Math.min(series.length - 1, o + horizon);
+            return { start, end };
+        }
+
         window.__app = {
             ready: false,
             lastForecast: null,
+            forecastCount: 0, // incremented once per *accepted* (non-stale) forecast response -- test hook
             setOrigin(i) {
-                originSlider.value = i;
-                onOriginChange();
+                commitOrigin(i);
+            },
+            logLineCount() {
+                return logLinesOrder.length;
             },
         };
 
-        function draw(origin, forecast) {
-            const w = canvas.width, h = canvas.height;
-            ctx2d.clearRect(0, 0, w, h);
+        // ---- canvas setup (devicePixelRatio-aware) ----
+        function fitCanvas(canvas, ctx) {
+            const dpr = window.devicePixelRatio || 1;
+            const rect = canvas.getBoundingClientRect();
+            canvas.width = Math.max(1, Math.round(rect.width * dpr));
+            canvas.height = Math.max(1, Math.round(rect.height * dpr));
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            return { w: rect.width, h: rect.height };
+        }
+
+        // ---- main chart ----
+        function drawChart() {
+            const { w, h } = fitCanvas(chartCanvas, chartCtx);
+            chartCtx.clearRect(0, 0, w, h);
             if (!series) return;
 
-            const forecastValues = forecast ? forecast.quantiles : [];
-            let lo = Math.min(...series);
-            let hi = Math.max(...series);
-            for (const v of forecastValues) {
-                lo = Math.min(lo, v);
-                hi = Math.max(hi, v);
+            const { start, end } = windowFor(origin);
+            const padL = 44, padB = 20, padT = 10, padR = 8;
+            const plotW = w - padL - padR, plotH = h - padT - padB;
+            const xAt = (i) => padL + ((i - start) / (end - start)) * plotW;
+            const iAt = (px) => start + ((px - padL) / plotW) * (end - start);
+
+            // y-domain over displayed history + actual continuation + forecast band
+            let lo = Infinity, hi = -Infinity;
+            for (let i = start; i <= end; i++) { lo = Math.min(lo, series[i]); hi = Math.max(hi, series[i]); }
+            if (lastForecast && lastForecast.origin === origin) {
+                for (const v of lastForecast.quantiles) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
             }
             const pad = (hi - lo) * 0.1 || 1;
             lo -= pad; hi += pad;
+            const yAt = (v) => padT + plotH - ((v - lo) / (hi - lo)) * plotH;
 
-            const n = series.length;
-            const xAt = (i) => (i / (n - 1)) * w;
-            const yAt = (v) => h - ((v - lo) / (hi - lo)) * h;
-
-            // actual future (faint), full series beyond origin
-            ctx2d.strokeStyle = '#c7c7c7';
-            ctx2d.lineWidth = 1.5;
-            ctx2d.setLineDash([4, 3]);
-            ctx2d.beginPath();
-            for (let i = origin; i < n; i++) {
-                const x = xAt(i), y = yAt(series[i]);
-                if (i === origin) ctx2d.moveTo(x, y); else ctx2d.lineTo(x, y);
+            // gridlines + y labels
+            chartCtx.strokeStyle = '#eee';
+            chartCtx.fillStyle = '#999';
+            chartCtx.font = '10px "IBM Plex Mono", monospace';
+            chartCtx.lineWidth = 1;
+            const nYTicks = 4;
+            for (let t = 0; t <= nYTicks; t++) {
+                const v = lo + (t / nYTicks) * (hi - lo);
+                const y = yAt(v);
+                chartCtx.beginPath();
+                chartCtx.moveTo(padL, y);
+                chartCtx.lineTo(w - padR, y);
+                chartCtx.stroke();
+                chartCtx.fillText(Math.round(v).toLocaleString(), 2, y + 3);
             }
-            ctx2d.stroke();
-            ctx2d.setLineDash([]);
-
-            // context (solid, up to origin)
-            ctx2d.strokeStyle = '#1a1a1a';
-            ctx2d.lineWidth = 1.75;
-            ctx2d.beginPath();
-            for (let i = 0; i <= origin; i++) {
-                const x = xAt(i), y = yAt(series[i]);
-                if (i === 0) ctx2d.moveTo(x, y); else ctx2d.lineTo(x, y);
+            // x gridlines: month boundaries within [start, end]
+            const startDate = new Date(seriesStartDate.replace(' ', 'T') + 'Z');
+            let prevMonth = -1;
+            for (let i = start; i <= end; i++) {
+                const d = new Date(startDate.getTime() + i * 86400000);
+                if (d.getUTCDate() === 1 && d.getUTCMonth() !== prevMonth) {
+                    prevMonth = d.getUTCMonth();
+                    const x = xAt(i);
+                    chartCtx.beginPath();
+                    chartCtx.moveTo(x, padT);
+                    chartCtx.lineTo(x, h - padB);
+                    chartCtx.stroke();
+                    const label = d.toLocaleDateString('en-US', { month: 'short', year: prevMonth === 0 ? '2-digit' : undefined });
+                    chartCtx.fillText(label, x + 2, h - 6);
+                }
             }
-            ctx2d.stroke();
 
+            // actual continuation (dashed mid-gray), origin..end
+            chartCtx.strokeStyle = '#999';
+            chartCtx.lineWidth = 1.5;
+            chartCtx.setLineDash([4, 3]);
+            chartCtx.beginPath();
+            for (let i = origin; i <= end; i++) {
+                const x = xAt(i), y = yAt(series[i]);
+                if (i === origin) chartCtx.moveTo(x, y); else chartCtx.lineTo(x, y);
+            }
+            chartCtx.stroke();
+            chartCtx.setLineDash([]);
+
+            // history (solid black), start..origin
+            chartCtx.strokeStyle = '#1a1a1a';
+            chartCtx.lineWidth = 1.5;
+            chartCtx.beginPath();
+            for (let i = start; i <= origin; i++) {
+                const x = xAt(i), y = yAt(series[i]);
+                if (i === start) chartCtx.moveTo(x, y); else chartCtx.lineTo(x, y);
+            }
+            chartCtx.stroke();
+
+            // forecast bands + median
+            const forecast = lastForecast && lastForecast.origin === origin ? lastForecast : null;
             if (forecast) {
                 const { quantiles, horizon: hZ, nQuantiles: nq } = forecast;
                 const q = (t, qi) => quantiles[t * nq + qi];
-                // 10-90 band (quantile index 0 == 0.1, nq-1 == 0.9)
-                ctx2d.fillStyle = 'rgba(45, 125, 70, 0.18)';
-                ctx2d.beginPath();
-                for (let t = 0; t < hZ; t++) ctx2d.lineTo(xAt(origin + t), yAt(q(t, 0)));
-                for (let t = hZ - 1; t >= 0; t--) ctx2d.lineTo(xAt(origin + t), yAt(q(t, nq - 1)));
-                ctx2d.closePath();
-                ctx2d.fill();
 
-                // median (middle quantile index)
+                // Q10-Q90 (outer, light gray)
+                chartCtx.fillStyle = 'rgba(0, 0, 0, 0.09)';
+                chartCtx.beginPath();
+                for (let t = 0; t < hZ; t++) chartCtx.lineTo(xAt(origin + t), yAt(q(t, 0)));
+                for (let t = hZ - 1; t >= 0; t--) chartCtx.lineTo(xAt(origin + t), yAt(q(t, nq - 1)));
+                chartCtx.closePath();
+                chartCtx.fill();
+
+                // Q25-Q75 (inner, lighter gray)
+                if (nq >= 5) {
+                    chartCtx.fillStyle = 'rgba(0, 0, 0, 0.05)';
+                    chartCtx.beginPath();
+                    for (let t = 0; t < hZ; t++) chartCtx.lineTo(xAt(origin + t), yAt(q(t, 1)));
+                    for (let t = hZ - 1; t >= 0; t--) chartCtx.lineTo(xAt(origin + t), yAt(q(t, nq - 2)));
+                    chartCtx.closePath();
+                    chartCtx.fill();
+                }
+
+                // median (dark gray, 2px)
                 const mid = Math.floor(nq / 2);
-                ctx2d.strokeStyle = '#2d7d46';
-                ctx2d.lineWidth = 2;
-                ctx2d.beginPath();
-                ctx2d.moveTo(xAt(origin), yAt(series[origin]));
-                for (let t = 0; t < hZ; t++) ctx2d.lineTo(xAt(origin + t), yAt(q(t, mid)));
-                ctx2d.stroke();
+                chartCtx.strokeStyle = '#555';
+                chartCtx.lineWidth = 2;
+                chartCtx.beginPath();
+                chartCtx.moveTo(xAt(origin), yAt(series[origin]));
+                for (let t = 0; t < hZ; t++) chartCtx.lineTo(xAt(origin + t), yAt(q(t, mid)));
+                chartCtx.stroke();
             }
 
-            // origin marker
-            ctx2d.strokeStyle = '#999';
-            ctx2d.lineWidth = 1;
-            ctx2d.beginPath();
-            ctx2d.moveTo(xAt(origin), 0);
-            ctx2d.lineTo(xAt(origin), h);
-            ctx2d.stroke();
+            // origin marker: dashed vertical line + hollow circle at top (follows markerOrigin)
+            const mx = xAt(Math.min(end, Math.max(start, markerOrigin)));
+            chartCtx.strokeStyle = '#999';
+            chartCtx.lineWidth = 1;
+            chartCtx.setLineDash([3, 3]);
+            chartCtx.beginPath();
+            chartCtx.moveTo(mx, padT);
+            chartCtx.lineTo(mx, h - padB);
+            chartCtx.stroke();
+            chartCtx.setLineDash([]);
+            chartCtx.beginPath();
+            chartCtx.arc(mx, padT, 3.5, 0, Math.PI * 2);
+            chartCtx.strokeStyle = '#555';
+            chartCtx.lineWidth = 1.5;
+            chartCtx.stroke();
         }
 
-        function onOriginChange() {
-            const origin = parseInt(originSlider.value, 10);
-            originLabel.textContent = originDate ? `${originDate(origin)}` : `t = ${origin}`;
-            draw(origin, lastForecast && lastForecast.origin === origin ? lastForecast : null);
-            worker.postMessage({ type: 'forecast', origin });
+        // ---- full-series strip (2-tone, shows window position) ----
+        function drawStrip() {
+            const { w, h } = fitCanvas(stripCanvas, stripCtx);
+            stripCtx.clearRect(0, 0, w, h);
+            if (!series) return;
+            const n = series.length;
+            const xAt = (i) => (i / (n - 1)) * w;
+
+            stripCtx.fillStyle = '#eee';
+            stripCtx.fillRect(0, 0, w, h);
+
+            const { start, end } = windowFor(origin);
+            stripCtx.fillStyle = '#bbb';
+            stripCtx.fillRect(xAt(start), 0, Math.max(1, xAt(end) - xAt(start)), h);
+
+            const mx = xAt(Math.min(n - 1, Math.max(0, markerOrigin)));
+            stripCtx.strokeStyle = '#555';
+            stripCtx.lineWidth = 1.5;
+            stripCtx.beginPath();
+            stripCtx.moveTo(mx, 0);
+            stripCtx.lineTo(mx, h);
+            stripCtx.stroke();
         }
 
-        originSlider.addEventListener('input', onOriginChange);
+        function drawAll() {
+            drawChart();
+            drawStrip();
+        }
+
+        // ---- metrics (MAE / sMAPE / latency), against the real continuation ----
+        function updateMetrics() {
+            const forecast = lastForecast && lastForecast.origin === origin ? lastForecast : null;
+            if (!forecast) {
+                metricMae.textContent = '—';
+                metricSmape.textContent = '—';
+                metricLatencyInline.textContent = '—';
+                metricMs.textContent = '—';
+                return;
+            }
+            const { quantiles, horizon: hZ, nQuantiles: nq, ms } = forecast;
+            const mid = Math.floor(nq / 2);
+            let sae = 0, ssmape = 0;
+            for (let t = 0; t < hZ; t++) {
+                const actual = series[origin + t];
+                const pred = quantiles[t * nq + mid];
+                sae += Math.abs(actual - pred);
+                const denom = (Math.abs(actual) + Math.abs(pred)) / 2 || 1;
+                ssmape += Math.abs(actual - pred) / denom;
+            }
+            metricMae.textContent = (sae / hZ).toFixed(1);
+            metricSmape.textContent = ((ssmape / hZ) * 100).toFixed(1);
+            metricLatencyInline.textContent = ms.toFixed(0);
+            metricMs.textContent = ms.toFixed(1);
+        }
+
+        // ---- forecast request lifecycle ----
+        function scheduleForecast(o) {
+            if (debounceTimer) clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => {
+                requestIdCounter += 1;
+                worker.postMessage({ type: 'forecast', origin: o, requestId: requestIdCounter });
+            }, 150);
+        }
+
+        function commitOrigin(o) {
+            origin = clampOrigin(o);
+            markerOrigin = origin;
+            lastForecast = null;
+            originSlider.value = origin;
+            originLabel.textContent = originDateStr(origin);
+            drawAll();
+            updateMetrics();
+            scheduleForecast(origin);
+        }
+
+        function previewMarker(o) {
+            markerOrigin = clampOrigin(o);
+            originLabel.textContent = originDateStr(markerOrigin);
+            drawAll(); // cheap: only the marker line moves, history/forecast data is unchanged
+        }
+
+        // ---- slider: 'input' previews (marker only), 'change' commits ----
+        originSlider.addEventListener('input', () => previewMarker(parseInt(originSlider.value, 10)));
+        originSlider.addEventListener('change', () => commitOrigin(parseInt(originSlider.value, 10)));
+
+        // ---- chart: click/drag scrubs within the current window, release commits ----
+        function originFromChartEvent(e) {
+            const rect = chartCanvas.getBoundingClientRect();
+            const padL = 44, padR = 8;
+            const { start, end } = windowFor(origin);
+            const frac = Math.min(1, Math.max(0, (e.clientX - rect.left - padL) / (rect.width - padL - padR)));
+            return start + frac * (end - start);
+        }
+        function originFromStripEvent(e) {
+            const rect = stripCanvas.getBoundingClientRect();
+            const frac = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+            return frac * (series.length - 1);
+        }
+        function wireDrag(canvas, toOrigin) {
+            let dragging = false;
+            canvas.addEventListener('pointerdown', (e) => {
+                if (!window.__app.ready) return;
+                dragging = true;
+                canvas.setPointerCapture(e.pointerId);
+                previewMarker(toOrigin(e));
+            });
+            canvas.addEventListener('pointermove', (e) => {
+                if (!dragging) return;
+                previewMarker(toOrigin(e));
+            });
+            canvas.addEventListener('pointerup', () => {
+                if (!dragging) return;
+                dragging = false;
+                commitOrigin(markerOrigin);
+            });
+        }
+        wireDrag(chartCanvas, originFromChartEvent);
+        wireDrag(stripCanvas, originFromStripEvent);
 
         worker.onmessage = (e) => {
             const msg = e.data;
             switch (msg.type) {
                 case 'status':
                     updateStatus('loading', msg.text);
-                    logLine(msg.text);
+                    logLine(msg.text, msg.key);
                     break;
                 case 'ready': {
                     series = msg.series;
-                    contextCap = msg.contextCap;
                     horizon = msg.horizon;
                     nQuantiles = msg.nQuantiles;
                     seriesStartDate = msg.startDate;
@@ -394,21 +653,22 @@
                     originSlider.disabled = false;
                     metricsCard.style.display = 'block';
                     metricSize.textContent = formatBytes(msg.modelBytes);
-                    metricBackend.textContent = 'wasm/ndarray';
-                    logLine(`Series: ${msg.seriesName} (${series.length} points, ${msg.startDate.slice(0, 10)} to ${originDate(series.length - 1)})`);
-                    logLine(`Model loaded in ${msg.loadMs.toFixed(0)} ms (${formatBytes(msg.modelBytes)}, ${msg.nQuantiles} quantiles)`);
+                    metricBackend.textContent = msg.backend;
                     updateStatus('ready', 'Ready');
                     window.__app.ready = true;
-                    onOriginChange();
+                    commitOrigin(origin);
                     break;
                 }
                 case 'forecast': {
+                    if (msg.requestId !== requestIdCounter) break; // stale, a newer request superseded it
                     lastForecast = msg;
                     window.__app.lastForecast = msg;
-                    metricMs.textContent = msg.ms.toFixed(1);
-                    logLine(`Forecast origin ${msg.originDate || 't=' + msg.origin}: ${msg.ms.toFixed(1)} ms`);
-                    const origin = parseInt(originSlider.value, 10);
-                    if (origin === msg.origin) draw(origin, msg);
+                    window.__app.forecastCount += 1;
+                    logLine(`Forecast origin ${msg.originDate}: ${msg.ms.toFixed(1)} ms`, 'forecast');
+                    if (msg.origin === origin) {
+                        drawAll();
+                        updateMetrics();
+                    }
                     break;
                 }
                 case 'error':
