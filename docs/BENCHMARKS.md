@@ -189,9 +189,11 @@ What was not run: wgpu backend (GPU contended by `llm-life` all session — see 
 
 Analysis: `docs/runs/2026-09-19-gifteval-subset.md`.
 
-## Single-signal latency (native CPU, M2)
+## Single-signal latency (native, M2)
 
-- Machine: Apple M2 (Darwin 25.3.0), `ndarray` backend, GPU occupied by `llm-life train-a` throughout — wgpu/browser rows pending.
+### CPU (ndarray)
+
+- Machine: Apple M2 (Darwin 25.3.0), `ndarray` backend, GPU occupied by `llm-life train-a` throughout this sub-table's run.
 - Commit: `01257dc`.
 - Command: `t0-cli bench --weights <F32|GGUF> [--config config.json] --backend ndarray --signals 1 --context 512 --horizon 32 --warmup 2 --reps 10` — median of 10 after 2 warm-ups.
 
@@ -201,12 +203,29 @@ Analysis: `docs/runs/2026-09-19-gifteval-subset.md`.
 | f16 (load-time cast) | 203.3 | 0.799 | 419.9 |
 | Q8_0 | 108.9 | 0.543 | 398.0 |
 | Q4_0 | 58.6 | 0.362 | 424.2 |
-| wgpu (Metal), all quants | — | — | pending (GPU busy) |
-| WebGPU (browser), all quants | — | — | pending (GPU busy) |
-
-Compute class: all rows here run F32 compute (dequant to F32 happens once at load, matmuls are F32 regardless of storage quant) — the same "INT8-weight, FP32-compute" class their `t0-alpha-onnx-int8` card states for its export (`docs/reports/t0-published-numbers.md`). Latency comparisons against their numbers, once available, are therefore apples to apples on compute precision, not just on file size.
 
 Analysis: `docs/runs/2026-09-19-latency-cpu.md`.
+
+### wgpu (Metal)
+
+- Machine: Apple M2 (Darwin 25.3.0), `wgpu` backend, GPU confirmed idle (`llm-life train-a`/`eval-metrics` not running) for this sub-table's run.
+- Commit: this doc's commit, `t0-cli` built with `--no-default-features --features wgpu`.
+- Command, cold: `t0-cli bench --weights <F32|GGUF> [--config config.json] --backend wgpu --signals 1 --context 512 --horizon 32 --warmup 0 --reps 1` (first call, includes autotune/shader compile). Warm: same with `--warmup 2 --reps 10`, median of 10.
+
+| quant | file MB | load time (s) | cold first-call (ms) | warm median forward latency (ms) |
+|---|---|---|---|---|
+| F32 | 406.6 | 0.232-0.340 | 1031.9 | 945.6 |
+| f16 (load-time cast) | 203.3 | 0.265-0.295 | 854.6 | 883.9 |
+| Q8_0 | 108.9 | 0.376-1.453 | 1262.4 | 746.4 |
+| Q4_0 | 58.6 | 1.075-1.195 | 1657.2 | 704.6 |
+
+wgpu is slower than native ndarray CPU at this batch size (n_signals=1) — expected, per-dispatch overhead of many small unbatched GPU kernel launches dominates; wgpu only wins once batched (see the "chunked wgpu batch" table above, ~38-52 ms/signal at n=100-1000). Analysis: `docs/runs/2026-09-19-latency-wgpu.md`.
+
+### WebGPU (browser)
+
+Pending — see `crates/t0-wasm/README.md`'s WebGPU wiring status and `docs/runs/2026-09-19-web-smoke.md`.
+
+Compute class: every row above runs F32 compute (dequant to F32 happens once at load, matmuls are F32 regardless of storage quant) — the same "INT8-weight, FP32-compute" class their `t0-alpha-onnx-int8` card states for its export (`docs/reports/t0-published-numbers.md`). Latency comparisons against their numbers, once available, are therefore apples to apples on compute precision, not just on file size.
 
 ## Web smoke test (WASM CPU/ndarray, headless Chromium)
 
