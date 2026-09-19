@@ -1,0 +1,14 @@
+[
+  {
+    "name": "US births",
+    "file": "series.f32",
+    "meta": "series_meta.json",
+    "frequency": "D",
+    "unit": "births/day",
+    "window": { "start": "1988-07-01", "end": "1988-11-30" },
+    "defaultOrigin": "1988-11-30",
+    "horizon": 32,
+    "source": "GIFT-Eval (Salesforce/GiftEval on HuggingFace Hub), config us_births/D",
+    "license": "see web/data/README.md"
+  }
+]
