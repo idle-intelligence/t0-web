@@ -208,14 +208,18 @@ Analysis: `docs/runs/2026-09-19-latency-cpu.md`.
 
 - Machine: Apple M2 (Darwin 25.3.0), Playwright's bundled Chromium-for-Testing, GPU occupied by `llm-life train-a` throughout — WebGPU pending.
 - Commit: this doc's commit.
-- Command: `node scripts/headless/run.mjs --url http://127.0.0.1:8031/ --origins 200,400,560` (`python3 web/serve.py --port 8031` serving `web/`).
+- Series: `web/data/series.f32`, real public series `us_births` (daily US
+  births, 1969-01-01 to 1988-12-31, 7305 points; GIFT-Eval `us_births/D`,
+  same config as the GIFT-Eval subset table above) — replaces the earlier
+  synthetic 640-point placeholder. Source + license: `web/data/README.md`.
+- Command: `node scripts/headless/run.mjs --url http://127.0.0.1:8031/ --origins 500,3600,7000` (`python3 web/serve.py --port 8031` serving `web/`).
 
-| origin | context len | ms/forecast | length_ok | finite | monotone |
-|---|---|---|---|---|---|
-| 200 | 200 | 556.1 | true | true | true |
-| 400 | 400 | 678.5 | true | true | true |
-| 560 | 512 (capped) | 834.2 | true | true | true |
+| origin | origin date | context len | ms/forecast | length_ok | finite | monotone |
+|---|---|---|---|---|---|---|
+| 500 | 1970-05-16 | 500 | 599.9 | true | true | true |
+| 3600 | 1978-11-14 | 512 (capped) | 610.9 | true | true | true |
+| 7000 | 1988-02-25 | 512 (capped) | 592.4 | true | true | true |
 
-Result: PASS, avg 689.6 ms/forecast. Slower than native CPU (363-424 ms, same Q8_0 quant, table above) because `t0-wasm`'s WASM build has no SIMD128/threading enabled and runs single-threaded, vs native ndarray's 8 threads.
+Result: PASS, avg 601.1 ms/forecast. Slower than native CPU (363-424 ms, same Q8_0 quant, table above) because `t0-wasm`'s WASM build has no SIMD128/threading enabled and runs single-threaded, vs native ndarray's 8 threads.
 
 Analysis: `docs/runs/2026-09-19-web-smoke.md`.
