@@ -353,11 +353,24 @@ fn forecast_series<B: Backend>(
     let cfg = &model.config;
     let patch_size = cfg.patch_size;
     let v = raw.v;
-    assert_eq!(t_ctx % patch_size, 0, "context_len must be patch-aligned for this milestone");
-    assert_eq!(horizon % patch_size, 0, "horizon must be patch-aligned for this milestone");
-    assert!(t_ctx + horizon <= 1024, "beyond max_horizon needs autoregressive rollout (unimplemented)");
 
-    let window = raw.pad(patch_size, t_ctx); // no-op here since t_ctx is patch-aligned
+    // GIFT-Eval windows aren't patch-aligned (e.g. horizon=30 for daily
+    // series, horizon=8 for weekly) — round context/horizon up to whole
+    // patches via `TimeSeries::pad` (left-pads context, right-pads horizon
+    // with WITHHELD), forward once, then truncate the padded-horizon output
+    // back down to the caller's real `horizon`. Matches `Patcher.pad` +
+    // `RolloutManager.predict_step`'s own pad/truncate, restricted (like
+    // the rest of this milestone) to windows that fit in one non-rollout
+    // forward pass.
+    let pad_left = (patch_size - t_ctx % patch_size) % patch_size;
+    let padded_horizon = horizon.div_ceil(patch_size) * patch_size;
+    let padded_t_ctx = t_ctx + pad_left;
+    assert!(
+        padded_t_ctx + padded_horizon <= 1024,
+        "beyond max_horizon needs autoregressive rollout (unimplemented)"
+    );
+
+    let window = raw.pad(patch_size, t_ctx);
 
     let scaler = CausalScaler::new(cfg.scaler_use_arcsinh, cfg.scaler_eps, &cfg.scaler_eps_mode);
     let (scaled, loc_scale) = scaler.scale_input(&window);
@@ -370,18 +383,28 @@ fn forecast_series<B: Backend>(
 
     // Slice out the forecast region: patches [context_patches-1, +horizon_patches),
     // the decoder's next-patch prediction shifted by one (see model.rs's doc
-    // comment and RolloutManager.predict_step).
-    let context_patches = t_ctx / patch_size;
-    let horizon_patches = horizon / patch_size;
+    // comment and RolloutManager.predict_step), then drop the padded tail
+    // steps beyond the caller's real `horizon`.
+    let context_patches = padded_t_ctx / patch_size;
+    let horizon_patches = padded_horizon / patch_size;
     let per_patch = patch_size * n_q;
-    let mut out = vec![0.0f32; v * horizon * n_q];
+    let mut padded_out = vec![0.0f32; v * padded_horizon * n_q];
     for row in 0..v {
         for hp in 0..horizon_patches {
             let src_patch = context_patches - 1 + hp;
             let src_base = row * n_patches * per_patch + src_patch * per_patch;
-            let dst_base = row * horizon * n_q + hp * per_patch;
-            out[dst_base..dst_base + per_patch].copy_from_slice(&predictions[src_base..src_base + per_patch]);
+            let dst_base = row * padded_horizon * n_q + hp * per_patch;
+            padded_out[dst_base..dst_base + per_patch].copy_from_slice(&predictions[src_base..src_base + per_patch]);
         }
+    }
+    if padded_horizon == horizon {
+        return (padded_out, trace);
+    }
+    let mut out = vec![0.0f32; v * horizon * n_q];
+    for row in 0..v {
+        let src = row * padded_horizon * n_q;
+        let dst = row * horizon * n_q;
+        out[dst..dst + horizon * n_q].copy_from_slice(&padded_out[src..src + horizon * n_q]);
     }
     (out, trace)
 }
