@@ -106,44 +106,45 @@
             0%, 100% { opacity: 1; }
             50% { opacity: 0.4; }
         }
-        .controls {
-            display: flex;
-            align-items: center;
-            gap: 12px;
+        canvas {
+            display: block;
+            width: 100%;
         }
-        input[type="range"] {
-            flex: 1;
-        }
-        #originLabel {
-            font-family: 'IBM Plex Mono', monospace;
-            font-size: 13px;
-            color: var(--muted);
-            min-width: 90px;
-            text-align: right;
+        .io-chart {
+            height: 220px;
+            border: 1px solid var(--border);
+            background: var(--bg);
         }
         .info {
             font-size: 13px;
             color: var(--faint);
             margin-top: 12px;
         }
-
-        canvas {
-            display: block;
-            width: 100%;
+        .actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            align-items: center;
+            margin-top: 12px;
         }
-        #chart {
-            height: 320px;
-            border: 1px solid var(--border);
-            background: var(--bg);
-            cursor: crosshair;
-            touch-action: none;
-        }
-        #strip {
-            height: 40px;
-            margin-top: 6px;
-            border: 1px solid var(--border);
+        button {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 13px;
+            font-weight: 500;
+            padding: 8px 16px;
             cursor: pointer;
-            touch-action: none;
+            border: 1px solid var(--border);
+            background: transparent;
+            color: var(--text);
+            border-radius: 0;
+            transition: border-color 0.15s;
+        }
+        button:hover:not(:disabled) {
+            border-color: var(--text);
+        }
+        button:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
         }
         .legend {
             display: flex;
@@ -161,11 +162,6 @@
         .swatch-line { color: var(--text); }
         .swatch-line.forecast { color: #666; }
         .swatch-box { color: #bbb; }
-        .hint {
-            font-size: 12px;
-            color: var(--faint);
-            margin-top: 6px;
-        }
 
         #metricsCard { display: none; }
         .metrics-grid {
@@ -233,18 +229,17 @@
     </section>
 
     <section>
-        <h2>INPUT <span class="sub">· forecast origin</span></h2>
-        <div class="controls">
-            <input type="range" id="originSlider" min="64" max="7273" step="1" value="3600" disabled>
-            <span id="originLabel">t = 3600</span>
+        <h2>INPUT <span class="sub">· US births, daily</span></h2>
+        <canvas id="inputChart" class="io-chart"></canvas>
+        <p class="info">US births per day, July to November 1988. The model forecasts December from here.</p>
+        <div class="actions">
+            <button id="forecastBtn" type="button" disabled>Forecast</button>
         </div>
-        <p class="info" id="seriesInfo">series: US births · daily (<a href="./data/README.md">source + license</a>)</p>
     </section>
 
     <section>
-        <h2>OUTPUT <span class="sub">· forecast fan</span></h2>
-        <canvas id="chart"></canvas>
-        <canvas id="strip"></canvas>
+        <h2>OUTPUT <span class="sub">· December 1988 forecast</span></h2>
+        <canvas id="outputChart" class="io-chart"></canvas>
         <div class="legend">
             <span class="left">
                 <span><span class="swatch-line">—</span> Actual</span>
@@ -257,7 +252,6 @@
                 <span>LATENCY <span id="metricLatencyInline">—</span>ms</span>
             </span>
         </div>
-        <p class="hint">Click or drag to forecast from any point</p>
     </section>
 
     <section id="metricsCard">
@@ -284,18 +278,18 @@
             by <a href="https://www.theforecastingcompany.ai">The Forecasting Company</a>, Apache-2.0.
             Custom Rust inference compiled to WebAssembly.
         </p>
+        <p class="credit">Data: US daily births, 1969–1988 (<a href="./data/README.md">source + license</a>).</p>
         <a href="https://idleintelligence.org">idleintelligence.org</a>
     </footer>
 
     <script type="module">
         const statusDot = document.getElementById('statusDot');
         const statusTextEl = document.getElementById('status-text');
-        const originSlider = document.getElementById('originSlider');
-        const originLabel = document.getElementById('originLabel');
-        const chartCanvas = document.getElementById('chart');
-        const chartCtx = chartCanvas.getContext('2d');
-        const stripCanvas = document.getElementById('strip');
-        const stripCtx = stripCanvas.getContext('2d');
+        const inputCanvas = document.getElementById('inputChart');
+        const inputCtx = inputCanvas.getContext('2d');
+        const outputCanvas = document.getElementById('outputChart');
+        const outputCtx = outputCanvas.getContext('2d');
+        const forecastBtn = document.getElementById('forecastBtn');
         const metricsCard = document.getElementById('metricsCard');
         const metricMs = document.getElementById('metricMs');
         const metricSize = document.getElementById('metricSize');
@@ -304,11 +298,10 @@
         const metricSmape = document.getElementById('metricSmape');
         const metricLatencyInline = document.getElementById('metricLatencyInline');
 
-        const WINDOW_CONTEXT = 160; // chart displays this many context points before the origin
+        const PAD_L = 44, PAD_R = 8, PAD_T = 10, PAD_B = 20;
 
-        // STATUS is a single line, replaced as state changes: downloading %
-        // -> "model loaded (...), backend" -> "forecasting..." -> "forecast
-        // from <date> in <ms> ms". Boot/progress events also go to console.log.
+        // STATUS is a single line, replaced as state changes: "downloading
+        // model: N%" -> "model loaded, <backend>" -> "forecast in <ms> ms".
         function setDot(state) {
             statusDot.className = 'status-dot ' + state;
         }
@@ -332,37 +325,32 @@
         let nQuantiles = 5;
         let seriesStartDate = null;
 
-        let origin = 3600;      // committed origin: drives the drawn window + forecast data
-        let markerOrigin = 3600; // visual-only during drag/preview, may differ from `origin`
-        let lastForecast = null; // forecast payload for the committed `origin`, or null while pending
-        let requestIdCounter = 0;
-        let debounceTimer = null;
+        // No origin control of any kind: the data and the origin are fixed,
+        // chosen for this page (a Christmas/New Year dip is visible in the
+        // real December 1988 continuation). INPUT_WINDOW is the history the
+        // chart draws (the model also gets earlier points as context, up to
+        // 512, undrawn -- see web/worker.js's CONTEXT_CAP).
+        let INPUT_WINDOW = null;
+        let ORIGIN = null;
+        let lastForecast = null;
+        let forecasting = false;
 
-        function originDateStr(i) {
-            if (!seriesStartDate) return `t = ${i}`;
+        function dateAt(i) {
             const start = new Date(seriesStartDate.replace(' ', 'T') + 'Z');
-            const d = new Date(start.getTime() + i * 86400000);
-            return d.toISOString().slice(0, 10);
+            return new Date(start.getTime() + i * 86400000);
         }
-
-        function clampOrigin(o) {
-            const lo = parseInt(originSlider.min, 10);
-            const hi = series ? series.length - horizon : parseInt(originSlider.max, 10);
-            return Math.min(hi, Math.max(lo, Math.round(o)));
-        }
-
-        function windowFor(o) {
-            const start = Math.max(0, o - WINDOW_CONTEXT);
-            const end = Math.min(series.length - 1, o + horizon);
-            return { start, end };
+        function dateToIndex(dateStr) {
+            const start = new Date(seriesStartDate.replace(' ', 'T') + 'Z');
+            const d = new Date(dateStr + 'T00:00:00Z');
+            return Math.round((d.getTime() - start.getTime()) / 86400000);
         }
 
         window.__app = {
             ready: false,
             lastForecast: null,
-            forecastCount: 0, // incremented once per *accepted* (non-stale) forecast response -- test hook
-            setOrigin(i) {
-                commitOrigin(i);
+            forecastCount: 0, // incremented once per accepted forecast response -- test hook
+            runForecast() {
+                runForecast();
             },
         };
 
@@ -376,252 +364,201 @@
             return { w: rect.width, h: rect.height };
         }
 
-        // ---- main chart ----
-        function drawChart() {
-            const { w, h } = fitCanvas(chartCanvas, chartCtx);
-            chartCtx.clearRect(0, 0, w, h);
-            if (!series) return;
+        function drawGridlines(ctx, w, h, xAt, domain) {
+            const plotH = h - PAD_T - PAD_B;
+            const yAt = (v) => PAD_T + plotH - ((v - domain.lo) / (domain.hi - domain.lo)) * plotH;
 
-            const { start, end } = windowFor(origin);
-            const padL = 44, padB = 20, padT = 10, padR = 8;
-            const plotW = w - padL - padR, plotH = h - padT - padB;
-            const xAt = (i) => padL + ((i - start) / (end - start)) * plotW;
-            const iAt = (px) => start + ((px - padL) / plotW) * (end - start);
-
-            // y-domain over displayed history + actual continuation + forecast band
-            let lo = Infinity, hi = -Infinity;
-            for (let i = start; i <= end; i++) { lo = Math.min(lo, series[i]); hi = Math.max(hi, series[i]); }
-            if (lastForecast && lastForecast.origin === origin) {
-                for (const v of lastForecast.quantiles) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
-            }
-            const pad = (hi - lo) * 0.1 || 1;
-            lo -= pad; hi += pad;
-            const yAt = (v) => padT + plotH - ((v - lo) / (hi - lo)) * plotH;
-
-            // gridlines + y labels
-            chartCtx.strokeStyle = '#eee';
-            chartCtx.fillStyle = '#999';
-            chartCtx.font = '10px "IBM Plex Mono", monospace';
-            chartCtx.lineWidth = 1;
+            ctx.strokeStyle = '#eee';
+            ctx.fillStyle = '#999';
+            ctx.font = '10px "IBM Plex Mono", monospace';
+            ctx.lineWidth = 1;
             const nYTicks = 4;
             for (let t = 0; t <= nYTicks; t++) {
-                const v = lo + (t / nYTicks) * (hi - lo);
+                const v = domain.lo + (t / nYTicks) * (domain.hi - domain.lo);
                 const y = yAt(v);
-                chartCtx.beginPath();
-                chartCtx.moveTo(padL, y);
-                chartCtx.lineTo(w - padR, y);
-                chartCtx.stroke();
-                chartCtx.fillText(Math.round(v).toLocaleString(), 2, y + 3);
+                ctx.beginPath();
+                ctx.moveTo(PAD_L, y);
+                ctx.lineTo(w - PAD_R, y);
+                ctx.stroke();
+                ctx.fillText(Math.round(v).toLocaleString(), 2, y + 3);
             }
-            // x gridlines: month boundaries within [start, end]
-            const startDate = new Date(seriesStartDate.replace(' ', 'T') + 'Z');
+            return yAt;
+        }
+
+        function drawXTicks(ctx, w, h, xAt, start, end) {
+            ctx.strokeStyle = '#eee';
+            ctx.fillStyle = '#999';
             let prevMonth = -1;
             for (let i = start; i <= end; i++) {
-                const d = new Date(startDate.getTime() + i * 86400000);
+                const d = dateAt(i);
                 if (d.getUTCDate() === 1 && d.getUTCMonth() !== prevMonth) {
                     prevMonth = d.getUTCMonth();
                     const x = xAt(i);
-                    chartCtx.beginPath();
-                    chartCtx.moveTo(x, padT);
-                    chartCtx.lineTo(x, h - padB);
-                    chartCtx.stroke();
-                    const label = d.toLocaleDateString('en-US', { month: 'short', year: prevMonth === 0 ? '2-digit' : undefined });
-                    chartCtx.fillText(label, x + 2, h - 6);
+                    ctx.beginPath();
+                    ctx.moveTo(x, PAD_T);
+                    ctx.lineTo(x, h - PAD_B);
+                    ctx.stroke();
+                    const label = d.toLocaleDateString('en-US', { month: 'short' });
+                    ctx.fillText(label, x + 2, h - 6);
                 }
             }
-
-            // actual continuation (dashed mid-gray), origin..end
-            chartCtx.strokeStyle = '#999';
-            chartCtx.lineWidth = 1.5;
-            chartCtx.setLineDash([4, 3]);
-            chartCtx.beginPath();
-            for (let i = origin; i <= end; i++) {
-                const x = xAt(i), y = yAt(series[i]);
-                if (i === origin) chartCtx.moveTo(x, y); else chartCtx.lineTo(x, y);
-            }
-            chartCtx.stroke();
-            chartCtx.setLineDash([]);
-
-            // history (solid black), start..origin
-            chartCtx.strokeStyle = '#1a1a1a';
-            chartCtx.lineWidth = 1.5;
-            chartCtx.beginPath();
-            for (let i = start; i <= origin; i++) {
-                const x = xAt(i), y = yAt(series[i]);
-                if (i === start) chartCtx.moveTo(x, y); else chartCtx.lineTo(x, y);
-            }
-            chartCtx.stroke();
-
-            // forecast bands + median
-            const forecast = lastForecast && lastForecast.origin === origin ? lastForecast : null;
-            if (forecast) {
-                const { quantiles, horizon: hZ, nQuantiles: nq } = forecast;
-                const q = (t, qi) => quantiles[t * nq + qi];
-
-                // Q10-Q90 (outer, light gray)
-                chartCtx.fillStyle = 'rgba(0, 0, 0, 0.09)';
-                chartCtx.beginPath();
-                for (let t = 0; t < hZ; t++) chartCtx.lineTo(xAt(origin + t), yAt(q(t, 0)));
-                for (let t = hZ - 1; t >= 0; t--) chartCtx.lineTo(xAt(origin + t), yAt(q(t, nq - 1)));
-                chartCtx.closePath();
-                chartCtx.fill();
-
-                // Q25-Q75 (inner, lighter gray)
-                if (nq >= 5) {
-                    chartCtx.fillStyle = 'rgba(0, 0, 0, 0.05)';
-                    chartCtx.beginPath();
-                    for (let t = 0; t < hZ; t++) chartCtx.lineTo(xAt(origin + t), yAt(q(t, 1)));
-                    for (let t = hZ - 1; t >= 0; t--) chartCtx.lineTo(xAt(origin + t), yAt(q(t, nq - 2)));
-                    chartCtx.closePath();
-                    chartCtx.fill();
-                }
-
-                // median (dark gray, 2px)
-                const mid = Math.floor(nq / 2);
-                chartCtx.strokeStyle = '#555';
-                chartCtx.lineWidth = 2;
-                chartCtx.beginPath();
-                chartCtx.moveTo(xAt(origin), yAt(series[origin]));
-                for (let t = 0; t < hZ; t++) chartCtx.lineTo(xAt(origin + t), yAt(q(t, mid)));
-                chartCtx.stroke();
-            }
-
-            // origin marker: dashed vertical line + hollow circle at top (follows markerOrigin)
-            const mx = xAt(Math.min(end, Math.max(start, markerOrigin)));
-            chartCtx.strokeStyle = '#999';
-            chartCtx.lineWidth = 1;
-            chartCtx.setLineDash([3, 3]);
-            chartCtx.beginPath();
-            chartCtx.moveTo(mx, padT);
-            chartCtx.lineTo(mx, h - padB);
-            chartCtx.stroke();
-            chartCtx.setLineDash([]);
-            chartCtx.beginPath();
-            chartCtx.arc(mx, padT, 3.5, 0, Math.PI * 2);
-            chartCtx.strokeStyle = '#555';
-            chartCtx.lineWidth = 1.5;
-            chartCtx.stroke();
         }
 
-        // ---- full-series strip (2-tone, shows window position) ----
-        function drawStrip() {
-            const { w, h } = fitCanvas(stripCanvas, stripCtx);
-            stripCtx.clearRect(0, 0, w, h);
+        // ---- INPUT: the fixed history window, July-November 1988. No
+        // origin control -- static data, chosen once for this page.
+        function drawInputChart() {
+            const { w, h } = fitCanvas(inputCanvas, inputCtx);
+            inputCtx.clearRect(0, 0, w, h);
             if (!series) return;
-            const n = series.length;
-            const xAt = (i) => (i / (n - 1)) * w;
+            const { start, end } = INPUT_WINDOW;
+            const plotW = w - PAD_L - PAD_R;
+            const xAt = (i) => PAD_L + ((i - start) / (end - start)) * plotW;
 
-            stripCtx.fillStyle = '#eee';
-            stripCtx.fillRect(0, 0, w, h);
+            let lo = Infinity, hi = -Infinity;
+            for (let i = start; i <= end; i++) { lo = Math.min(lo, series[i]); hi = Math.max(hi, series[i]); }
+            const pad = (hi - lo) * 0.1 || 1;
+            const domain = { lo: lo - pad, hi: hi + pad };
+            const yAt = drawGridlines(inputCtx, w, h, xAt, domain);
+            drawXTicks(inputCtx, w, h, xAt, start, end);
 
-            const { start, end } = windowFor(origin);
-            stripCtx.fillStyle = '#bbb';
-            stripCtx.fillRect(xAt(start), 0, Math.max(1, xAt(end) - xAt(start)), h);
+            inputCtx.strokeStyle = '#1a1a1a';
+            inputCtx.lineWidth = 1.5;
+            inputCtx.beginPath();
+            for (let i = start; i <= end; i++) {
+                const x = xAt(i), y = yAt(series[i]);
+                if (i === start) inputCtx.moveTo(x, y); else inputCtx.lineTo(x, y);
+            }
+            inputCtx.stroke();
+        }
 
-            const mx = xAt(Math.min(n - 1, Math.max(0, markerOrigin)));
-            stripCtx.strokeStyle = '#555';
-            stripCtx.lineWidth = 1.5;
-            stripCtx.beginPath();
-            stripCtx.moveTo(mx, 0);
-            stripCtx.lineTo(mx, h);
-            stripCtx.stroke();
+        // ---- OUTPUT: the 32 days from December 1, 1988, own scale (32
+        // days stretched to fill the width -- forcing the same
+        // pixels-per-day as the ~5x-longer INPUT window would leave most of
+        // this canvas blank). Median, Q10-Q90 (+ Q25-Q75), and the real
+        // December values dashed -- shows whether the model anticipated the
+        // Christmas/New Year dip.
+        function drawOutputChart() {
+            const { w, h } = fitCanvas(outputCanvas, outputCtx);
+            outputCtx.clearRect(0, 0, w, h);
+            if (!series || !lastForecast) return;
+            const { quantiles, horizon: hZ, nQuantiles: nq } = lastForecast;
+            const q = (t, qi) => quantiles[t * nq + qi];
+            const plotW = w - PAD_L - PAD_R;
+            const xAt = (t) => PAD_L + (t / (hZ - 1)) * plotW;
+
+            let lo = Infinity, hi = -Infinity;
+            for (const v of quantiles) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
+            for (let t = 0; t < hZ; t++) {
+                if (ORIGIN + t < series.length) { lo = Math.min(lo, series[ORIGIN + t]); hi = Math.max(hi, series[ORIGIN + t]); }
+            }
+            const pad = (hi - lo) * 0.1 || 1;
+            const domain = { lo: lo - pad, hi: hi + pad };
+            const yAt = drawGridlines(outputCtx, w, h, xAt, domain);
+            // xAt here maps a horizon step t (0..hZ-1), not an absolute
+            // series index -- drawXTicks assumes the two coincide (true for
+            // the INPUT chart), so tick x-positions are computed inline.
+            outputCtx.strokeStyle = '#eee';
+            outputCtx.fillStyle = '#999';
+            let prevMonth = -1;
+            for (let t = 0; t < hZ; t++) {
+                const d = dateAt(ORIGIN + t);
+                if (d.getUTCDate() === 1 && d.getUTCMonth() !== prevMonth) {
+                    prevMonth = d.getUTCMonth();
+                    const x = xAt(t);
+                    outputCtx.beginPath();
+                    outputCtx.moveTo(x, PAD_T);
+                    outputCtx.lineTo(x, h - PAD_B);
+                    outputCtx.stroke();
+                    const label = d.toLocaleDateString('en-US', { month: 'short' });
+                    outputCtx.textAlign = x > w - 30 ? 'right' : 'left';
+                    outputCtx.fillText(label, x > w - 30 ? x - 2 : x + 2, h - 6);
+                    outputCtx.textAlign = 'left';
+                }
+            }
+
+            outputCtx.fillStyle = 'rgba(0, 0, 0, 0.09)';
+            outputCtx.beginPath();
+            for (let t = 0; t < hZ; t++) outputCtx.lineTo(xAt(t), yAt(q(t, 0)));
+            for (let t = hZ - 1; t >= 0; t--) outputCtx.lineTo(xAt(t), yAt(q(t, nq - 1)));
+            outputCtx.closePath();
+            outputCtx.fill();
+
+            if (nq >= 5) {
+                outputCtx.fillStyle = 'rgba(0, 0, 0, 0.05)';
+                outputCtx.beginPath();
+                for (let t = 0; t < hZ; t++) outputCtx.lineTo(xAt(t), yAt(q(t, 1)));
+                for (let t = hZ - 1; t >= 0; t--) outputCtx.lineTo(xAt(t), yAt(q(t, nq - 2)));
+                outputCtx.closePath();
+                outputCtx.fill();
+            }
+
+            // actual December 1988 values (dashed) -- last horizon day (Jan
+            // 1, 1989) has no ground truth, the series ends Dec 31, 1988.
+            outputCtx.strokeStyle = '#999';
+            outputCtx.lineWidth = 1.5;
+            outputCtx.setLineDash([4, 3]);
+            outputCtx.beginPath();
+            let started = false;
+            for (let t = 0; t < hZ; t++) {
+                if (ORIGIN + t >= series.length) break;
+                const x = xAt(t), y = yAt(series[ORIGIN + t]);
+                if (!started) { outputCtx.moveTo(x, y); started = true; } else outputCtx.lineTo(x, y);
+            }
+            outputCtx.stroke();
+            outputCtx.setLineDash([]);
+
+            const mid = Math.floor(nq / 2);
+            outputCtx.strokeStyle = '#555';
+            outputCtx.lineWidth = 2;
+            outputCtx.beginPath();
+            for (let t = 0; t < hZ; t++) {
+                const x = xAt(t), y = yAt(q(t, mid));
+                if (t === 0) outputCtx.moveTo(x, y); else outputCtx.lineTo(x, y);
+            }
+            outputCtx.stroke();
         }
 
         function drawAll() {
-            drawChart();
-            drawStrip();
+            drawInputChart();
+            drawOutputChart();
         }
 
-        // ---- metrics (MAE / sMAPE / latency), against the real continuation ----
+        // ---- metrics (MAE / sMAPE / latency), against the real December
+        // values only (the last horizon day has no ground truth) ----
         function updateMetrics() {
-            const forecast = lastForecast && lastForecast.origin === origin ? lastForecast : null;
-            if (!forecast) {
+            if (!lastForecast) {
                 metricMae.textContent = '—';
                 metricSmape.textContent = '—';
                 metricLatencyInline.textContent = '—';
                 metricMs.textContent = '—';
                 return;
             }
-            const { quantiles, horizon: hZ, nQuantiles: nq, ms } = forecast;
+            const { quantiles, horizon: hZ, nQuantiles: nq, ms } = lastForecast;
             const mid = Math.floor(nq / 2);
-            let sae = 0, ssmape = 0;
+            let sae = 0, ssmape = 0, n = 0;
             for (let t = 0; t < hZ; t++) {
-                const actual = series[origin + t];
+                if (ORIGIN + t >= series.length) continue;
+                const actual = series[ORIGIN + t];
                 const pred = quantiles[t * nq + mid];
                 sae += Math.abs(actual - pred);
                 const denom = (Math.abs(actual) + Math.abs(pred)) / 2 || 1;
                 ssmape += Math.abs(actual - pred) / denom;
+                n += 1;
             }
-            metricMae.textContent = (sae / hZ).toFixed(1);
-            metricSmape.textContent = ((ssmape / hZ) * 100).toFixed(1);
+            metricMae.textContent = (sae / n).toFixed(1);
+            metricSmape.textContent = ((ssmape / n) * 100).toFixed(1);
             metricLatencyInline.textContent = ms.toFixed(0);
             metricMs.textContent = ms.toFixed(1);
         }
 
-        // ---- forecast request lifecycle ----
-        function scheduleForecast(o) {
-            if (debounceTimer) clearTimeout(debounceTimer);
-            debounceTimer = setTimeout(() => {
-                requestIdCounter += 1;
-                worker.postMessage({ type: 'forecast', origin: o, requestId: requestIdCounter });
-            }, 150);
+        function runForecast() {
+            if (forecasting || !window.__app.ready) return;
+            forecasting = true;
+            forecastBtn.disabled = true;
+            setStatus('forecasting…');
+            worker.postMessage({ type: 'forecast', origin: ORIGIN, requestId: 1 });
         }
-
-        function commitOrigin(o) {
-            origin = clampOrigin(o);
-            markerOrigin = origin;
-            lastForecast = null;
-            originSlider.value = origin;
-            originLabel.textContent = originDateStr(origin);
-            if (window.__app.ready) setStatus('forecasting…');
-            drawAll();
-            updateMetrics();
-            scheduleForecast(origin);
-        }
-
-        function previewMarker(o) {
-            markerOrigin = clampOrigin(o);
-            originLabel.textContent = originDateStr(markerOrigin);
-            drawAll(); // cheap: only the marker line moves, history/forecast data is unchanged
-        }
-
-        // ---- slider: 'input' previews (marker only), 'change' commits ----
-        originSlider.addEventListener('input', () => previewMarker(parseInt(originSlider.value, 10)));
-        originSlider.addEventListener('change', () => commitOrigin(parseInt(originSlider.value, 10)));
-
-        // ---- chart: click/drag scrubs within the current window, release commits ----
-        function originFromChartEvent(e) {
-            const rect = chartCanvas.getBoundingClientRect();
-            const padL = 44, padR = 8;
-            const { start, end } = windowFor(origin);
-            const frac = Math.min(1, Math.max(0, (e.clientX - rect.left - padL) / (rect.width - padL - padR)));
-            return start + frac * (end - start);
-        }
-        function originFromStripEvent(e) {
-            const rect = stripCanvas.getBoundingClientRect();
-            const frac = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
-            return frac * (series.length - 1);
-        }
-        function wireDrag(canvas, toOrigin) {
-            let dragging = false;
-            canvas.addEventListener('pointerdown', (e) => {
-                if (!window.__app.ready) return;
-                dragging = true;
-                canvas.setPointerCapture(e.pointerId);
-                previewMarker(toOrigin(e));
-            });
-            canvas.addEventListener('pointermove', (e) => {
-                if (!dragging) return;
-                previewMarker(toOrigin(e));
-            });
-            canvas.addEventListener('pointerup', () => {
-                if (!dragging) return;
-                dragging = false;
-                commitOrigin(markerOrigin);
-            });
-        }
-        wireDrag(chartCanvas, originFromChartEvent);
-        wireDrag(stripCanvas, originFromStripEvent);
+        forecastBtn.addEventListener('click', runForecast);
 
         worker.onmessage = (e) => {
             const msg = e.data;
@@ -635,30 +572,34 @@
                     horizon = msg.horizon;
                     nQuantiles = msg.nQuantiles;
                     seriesStartDate = msg.startDate;
-                    originSlider.max = series.length - horizon;
-                    originSlider.disabled = false;
+                    ORIGIN = dateToIndex('1988-12-01');
+                    INPUT_WINDOW = { start: dateToIndex('1988-07-01'), end: ORIGIN - 1 };
                     metricsCard.style.display = 'block';
                     metricSize.textContent = formatBytes(msg.modelBytes);
                     metricBackend.textContent = msg.backend;
                     setDot('ready');
-                    setStatus(`model loaded (${formatBytes(msg.modelBytes)}), ${formatBackend(msg.backend)}`);
+                    setStatus(`model loaded, ${formatBackend(msg.backend)}`);
                     window.__app.ready = true;
-                    commitOrigin(origin);
+                    forecastBtn.disabled = false;
+                    drawAll();
+                    runForecast();
                     break;
                 }
                 case 'forecast': {
-                    if (msg.requestId !== requestIdCounter) break; // stale, a newer request superseded it
+                    forecasting = false;
+                    forecastBtn.disabled = false;
                     lastForecast = msg;
                     window.__app.lastForecast = msg;
                     window.__app.forecastCount += 1;
-                    setStatus(`forecast from ${msg.originDate} in ${msg.ms.toFixed(0)} ms`);
-                    if (msg.origin === origin) {
-                        drawAll();
-                        updateMetrics();
-                    }
+                    setDot('ready');
+                    setStatus(`forecast in ${msg.ms.toFixed(0)} ms`);
+                    drawAll();
+                    updateMetrics();
                     break;
                 }
                 case 'error':
+                    forecasting = false;
+                    forecastBtn.disabled = false;
                     setDot('error');
                     setStatus('Error: ' + msg.message);
                     console.error(msg.message);
