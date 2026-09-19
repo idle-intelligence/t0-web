@@ -97,11 +97,27 @@ async function cachedFetch(url, label) {
     return buf.buffer;
 }
 
+// Backend selection: WebGPU if this worker's `navigator.gpu` exists
+// (dedicated workers get their own WorkerNavigator with the same `gpu`
+// property as the window), else the CPU (burn-ndarray) build. Two
+// separate wasm-pack outputs -- `pkg-wgpu/` (built with
+// `--no-default-features --features wgpu`) and `pkg/` (default,
+// `ndarray`) -- since the backend is a compile-time Cargo feature, same
+// convention as `crates/cli`.
+const HAS_WEBGPU = typeof navigator !== 'undefined' && !!navigator.gpu;
+const BACKEND = HAS_WEBGPU ? 'webgpu' : 'wasm/ndarray';
+const PKG_DIR = HAS_WEBGPU ? './pkg-wgpu' : './pkg';
+
 async function handleLoad() {
-    self.postMessage({ type: 'status', text: 'Loading WASM module...' });
-    const wasmJsUrl = new URL('./pkg/t0_wasm.js', import.meta.url).href;
+    self.postMessage({ type: 'status', text: `Loading WASM module (${BACKEND})...` });
+    const wasmJsUrl = new URL(`${PKG_DIR}/t0_wasm.js`, import.meta.url).href;
     t0wasm = await import(wasmJsUrl);
     await t0wasm.default();
+    // Must run before T0Wasm.load(): on wgpu this drives the async
+    // requestAdapter()/requestDevice() setup that WASM has no blocking
+    // executor for (see t0-wasm's initBackend doc comment); a no-op on
+    // ndarray.
+    await t0wasm.initBackend();
 
     self.postMessage({ type: 'status', key: 'download', text: 'Downloading model (Q8_0, ~109 MB)...' });
     const modelBuf = await cachedFetch(MODEL_URL, 'Downloading model');
@@ -122,8 +138,7 @@ async function handleLoad() {
         text: `Series: ${seriesMeta.name} (${seriesMeta.n_points} points, ${seriesMeta.start_date.slice(0, 10)} to ${dateAtIndex(seriesMeta.n_points - 1)})`,
     });
 
-    const backend = 'wasm/ndarray';
-    self.postMessage({ type: 'status', key: 'backend', text: `Backend: ${backend}` });
+    self.postMessage({ type: 'status', key: 'backend', text: `Backend: ${BACKEND}` });
 
     self.postMessage({
         type: 'ready',
@@ -136,7 +151,7 @@ async function handleLoad() {
         nQuantiles: model.nQuantiles(),
         contextCap: CONTEXT_CAP,
         horizon: HORIZON,
-        backend,
+        backend: BACKEND,
     });
 }
 

@@ -11,8 +11,12 @@
 //      does not grow the STATUS log line count (repeated forecast/download
 //      lines update in place; only genuine state changes append).
 //
-// WASM CPU (burn-ndarray) only -- WebGPU is not wired up yet (see
-// crates/t0-wasm/README.md), so there is nothing to select here.
+// Backend is auto-selected by web/worker.js (WebGPU if navigator.gpu
+// exists, else WASM CPU/burn-ndarray) -- this bundled Chromium-for-Testing
+// exposes navigator.gpu with a real hardware adapter on http origins with
+// no extra launch flags needed (confirmed this session on this Mac; see
+// docs/runs/2026-09-19-web-smoke.md), so this script always exercises
+// whichever backend that Chromium picks and logs it.
 //
 // Usage: node scripts/headless/run.mjs [--url http://127.0.0.1:PORT/] [--origins 200,400,560]
 import { fileURLToPath } from 'node:url';
@@ -81,6 +85,9 @@ async function main() {
     // Wait for the initial (page-load-default-origin) forecast to settle
     // before starting the timed checks below.
     await page.waitForFunction(() => window.__app.lastForecast !== null, undefined, { timeout: 30000 });
+    const backend = await page.evaluate(() => document.getElementById('metricBackend').textContent);
+    console.log(`Backend: ${backend}`);
+    report.backend = backend;
 
     for (const origin of ORIGINS) {
       await page.evaluate((o) => window.__app.setOrigin(o), origin);
@@ -163,7 +170,7 @@ async function main() {
 
     report.pass = true;
     const avgMs = report.origins.reduce((s, o) => s + o.ms, 0) / report.origins.length;
-    console.log(`\nPASS -- ${report.origins.length} origins, avg ${avgMs.toFixed(1)} ms/forecast (WASM CPU/ndarray; WebGPU pending)`);
+    console.log(`\nPASS -- ${report.origins.length} origins, avg ${avgMs.toFixed(1)} ms/forecast (backend: ${report.backend})`);
   } catch (err) {
     report.error = String(err && err.message ? err.message : err);
     console.log('FAIL:', report.error);

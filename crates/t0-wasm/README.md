@@ -6,60 +6,80 @@ this workspace), never on `llm-web`.
 
 ## Build
 
+Two separate `wasm-pack` outputs, one per backend feature (backend is a
+compile-time Cargo feature, same convention as `crates/cli` — never a
+runtime switch inside the library):
+
 ```
 wasm-pack build crates/t0-wasm --target web --release
+wasm-pack build crates/t0-wasm --target web --out-dir pkg-wgpu --release -- --no-default-features --features wgpu
 ```
 
-Produces `crates/t0-wasm/pkg/` (`t0_wasm.js` + `.wasm`), loaded by
-`web/worker.js` as an ES module.
+Produces `crates/t0-wasm/pkg/` (ndarray/CPU) and `crates/t0-wasm/pkg-wgpu/`
+(wgpu/WebGPU), each `t0_wasm.js` + `.wasm`. `web/worker.js` copies both
+into `web/pkg/` and `web/pkg-wgpu/` (gitignored, rebuild-and-copy, not
+committed) and picks one at runtime based on `navigator.gpu`.
 
 ## API
 
+- `initBackend(): Promise<void>` — **must be awaited once, before
+  `T0Wasm.load`**, on every backend. On `wgpu` this drives the real async
+  `requestAdapter`/`requestDevice` setup (`cubecl_wgpu::init_setup_async`);
+  a no-op on `ndarray`. See "WebGPU status" below for why this exists.
 - `T0Wasm.load(gguf_bytes: Uint8Array) -> T0Wasm` — parses a GGUF file (as
   written by `t0-cli export-gguf`) and builds the model.
-- `instance.forecast(context: Float32Array, horizon: number) -> Float32Array`
-  — one forward pass, one signal. Returns `horizon * nQuantiles()` values,
-  time-major then quantile-minor (same layout as `t0-cli gifteval`'s
+- `instance.forecast(context: Float32Array, horizon: number) -> Promise<Float32Array>`
+  — one forward pass, one signal. Always returns a `Promise` (JS:
+  `await model.forecast(...)`) regardless of backend, since it always goes
+  through `t0_core::forecast_async` (`into_data_async().await`, never the
+  sync `into_data()` — see "WebGPU status"). Returns `horizon * nQuantiles()`
+  values, time-major then quantile-minor (same layout as `t0-cli gifteval`'s
   output).
 - `instance.nQuantiles() -> number` — 5 for both t0-alpha and t0-beta
   (`config.quantile_levels.len()`).
 
 ## Backend
 
-CPU only (`burn-ndarray`, the `ndarray` feature, on by default). `NdArray`
-is fully synchronous, so `Tensor::into_data()` inside
-`t0_core::model::T0Model::forward` never touches an async GPU readback path
-here — that's a `wgpu`-only hazard (`.into_data_async().await` is required
-there, never `.into_data()`), not one this crate has yet.
+Compile-time Cargo feature: `ndarray` (default, CPU, `burn-ndarray`) or
+`wgpu` (`burn_wgpu::Wgpu<f32, i32>`), mutually exclusive. `web/worker.js`
+selects which built `pkg` to load based on `navigator.gpu` at runtime;
+`forecast` and `initBackend` are async on every backend so the JS caller
+never has to branch on which one it got.
 
-## WebGPU status: not wired up
+## WebGPU status: wired up and verified end to end
 
-A `wgpu` Cargo feature exists (`Backend = burn_wgpu::Wgpu<f32, i32>`) and
-the crate *compiles* under it for wasm32, because `t0-core` already builds
-against any `burn::tensor::backend::Backend` and `burn-wgpu` compiles for
-wasm32 (used natively already, see `crates/cli`'s `wgpu` feature and
-`docs/BENCHMARKS.md`'s Metal rows). It has **not been run** in a browser:
+Two hazards had to be fixed to get `wgpu` working in a real browser (not
+just compiling for wasm32):
 
-- `Weights::load`/`load_gguf_bytes` build every tensor with
-  `Tensor::from_floats`, which is a synchronous host->device upload; fine
-  on `wgpu` too (uploads don't need the async-readback treatment, only
-  *downloads* do), but untested end-to-end here.
-- `forecast`'s `Tensor::into_data()` call in `t0_core::model::forward`
-  (`model.rs:187`) is a **synchronous GPU readback**. On `wgpu` in a real
-  browser this can deadlock (the constraint this repo's CLAUDE.md and the
-  owning agent's brief both call out: never `.into_data()` on `wgpu` in
-  WASM, always `.into_data_async().await`). `t0-core::forecast` is a sync
-  function today (used synchronously by the native CLI too), so making the
-  `wgpu` path safe means either (a) an async `forecast_async` variant in
-  `t0-core` behind a feature, or (b) restricting `wgpu` use in `t0-wasm` to
-  a Web Worker with a wrapper that awaits `into_data_async()` at the
-  crate's own boundary instead of inside `t0-core`.
-- This session's hard constraint was CPU-only measurements (the GPU was
-  occupied by a concurrent fine-tune) — no wgpu/WebGPU build or run was
-  attempted here, in the browser or otherwise.
+1. **Synchronous GPU readback deadlock.** `Tensor::into_data()` calls
+   `try_read_sync`, which panics on wasm32 ("this can happen on platforms
+   that don't support blocking futures like WASM") because there's no
+   blocking executor. Fixed by adding `T0Model::forward_async` /
+   `t0_core::forecast_async` / `forecast_series_async` (all in
+   `crates/t0-core/src/model.rs`), which read back with
+   `into_data_async().await` instead. `T0Wasm::forecast` always calls the
+   `_async` path, on every backend — `NdArray`'s `into_data_async`
+   resolves immediately (no real async work), `wgpu`'s does a genuine
+   async GPU readback.
+2. **Lazy synchronous device/adapter init.** Less obvious, and hit even
+   *before* any forecast call, during `T0Wasm::load`: the first tensor op
+   run on a `WgpuDevice` that hasn't been explicitly initialized triggers a
+   lazy setup path that also panics with the same `try_read_sync` message,
+   because `requestAdapter`/`requestDevice` are only available as async
+   browser APIs. Fixed by exposing `initBackend()`, which awaits
+   `cubecl_wgpu::init_setup_async::<WebGpu>(&WgpuDevice::default(), ..)`
+   once before `T0Wasm.load` is ever called. `web/worker.js` awaits it
+   right after the wasm module's own `default()` init. A no-op on
+   `ndarray` (still safe/cheap to await so JS doesn't need to branch).
 
-TODO (next session, GPU free): add `t0_core::model::forecast_async` behind
-a `wgpu`-shaped feature, swap `T0Wasm::forecast` to await it when built
-with `--features wgpu`, verify in Playwright with a real (non-headless-CPU)
-WebGPU-capable Chromium, and only then advertise a `wgpu` row in
-`docs/BENCHMARKS.md`.
+Verified in Playwright's bundled Chromium-for-Testing (`chromium-1229`,
+`150.0.7871.24`) on this Mac (Apple M2): **no special launch flags were
+needed** — `navigator.gpu` is present with a real hardware Metal adapter on
+`http://` origins in this Chromium version by default (confirmed via
+`adapter.features` listing GPU-specific features like `subgroups`,
+`texture-compression-bc`; `navigator.gpu` was *not* present on
+`about:blank`, which has an opaque origin). `--enable-unsafe-webgpu` /
+`--use-angle=metal` were not needed and not passed — this Chromium-for-Testing
+revision (150.0.7871.24) already ships WebGPU enabled by default over `http://`
+origins on this Mac; see `docs/runs/2026-09-19-web-smoke.md` for the exact
+headless run and numbers.

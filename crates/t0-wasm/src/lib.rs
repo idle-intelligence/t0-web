@@ -1,9 +1,15 @@
 //! `t0-wasm`: `wasm-bindgen` surface over `t0-core`, self-contained (no
-//! `llm-web` dependency). CPU-only (`burn-ndarray`) for now — see
-//! `README.md` for the WebGPU status. `NdArray` is fully synchronous, so
-//! `forecast`'s `Tensor::into_data()` call inside `t0_core::model::forward`
-//! never touches an async GPU readback path; that constraint only applies
-//! once a `wgpu` backend is wired in here (tracked in `README.md`).
+//! `llm-web` dependency). Backend is a compile-time Cargo feature, same
+//! convention as `crates/cli` (`ndarray` default, `wgpu` mutually
+//! exclusive with it, see `Cargo.toml`).
+//!
+//! `forecast` awaits `t0_core::forecast_async` (never the sync `forecast`,
+//! which calls `Tensor::into_data()` — a deadlock hazard on `wgpu` in a
+//! real browser, see this crate's `README.md`) so JS can always
+//! `await model.forecast(...)` regardless of which backend the build was
+//! made with: `NdArray`'s `into_data_async` resolves immediately (no real
+//! async work), `wgpu`'s does a genuine async GPU readback. `#[wasm_bindgen]`
+//! turns the `async fn` into a method that returns a JS `Promise`.
 
 use wasm_bindgen::prelude::*;
 
@@ -14,6 +20,28 @@ type Backend = burn_wgpu::Wgpu<f32, i32>;
 
 fn to_js_err(e: anyhow::Error) -> JsValue {
     JsValue::from_str(&format!("{e:#}"))
+}
+
+/// Must be awaited once, before `T0Wasm::load`, on every backend. On
+/// `wgpu` this does the real work: `cubecl_wgpu`'s device/adapter/queue
+/// setup (`requestAdapter`/`requestDevice`) is only available as an async
+/// API in the browser (no blocking executor exists in WASM), so it has to
+/// be driven from JS's event loop via `init_setup_async` *before* any
+/// tensor touches `WgpuDevice::default()` — otherwise the first tensor op
+/// falls back to a synchronous lazy-init path
+/// (`cubecl_common::reader::try_read_sync`) and panics with "Failed to
+/// read tensor data synchronously... this can happen on platforms that
+/// don't support blocking futures like WASM" (confirmed by hitting exactly
+/// that panic before this function existed). On `ndarray` this is a no-op
+/// (`NdArray` has no async device setup) but is still safe/cheap to await
+/// so JS doesn't need to branch on backend.
+#[wasm_bindgen(js_name = initBackend)]
+pub async fn init_backend() {
+    #[cfg(all(feature = "wgpu", not(feature = "ndarray")))]
+    {
+        let device = burn_wgpu::WgpuDevice::default();
+        burn_wgpu::init_setup_async::<burn_wgpu::graphics::WebGpu>(&device, Default::default()).await;
+    }
 }
 
 #[wasm_bindgen]
@@ -51,12 +79,15 @@ impl T0Wasm {
     /// requested. Returns `horizon * n_quantiles` values, time-major then
     /// quantile-minor. No autoregressive rollout — same
     /// `context.len() + horizon <= 1024` (padded to patch size) ceiling as
-    /// the native CLI (`t0_core::model::forecast_series`).
+    /// the native CLI (`t0_core::model::forecast_series`). Returns a
+    /// `Promise` (JS: `await model.forecast(...)`) on every backend, since
+    /// this always goes through `t0_core::forecast_async` — see this
+    /// module's doc comment.
     #[wasm_bindgen]
-    pub fn forecast(&self, context: &[f32], horizon: usize) -> Vec<f32> {
+    pub async fn forecast(&self, context: Vec<f32>, horizon: usize) -> Vec<f32> {
         let device = Default::default();
         let t_ctx = context.len();
-        let (out, _) = t0_core::forecast(&self.model, context, 1, t_ctx, horizon, &device, false);
+        let (out, _) = t0_core::forecast_async(&self.model, &context, 1, t_ctx, horizon, &device, false).await;
         out
     }
 }
