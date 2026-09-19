@@ -136,6 +136,8 @@ Analysis and the upstream cubek-matmul issue note: `docs/runs/2026-09-19-milesto
 
 Their number is for **t0-beta** (256M params, embed_dim 1024); ours here is **t0-alpha** (102M params, embed_dim 512) — the two checkpoints are not architecture-identical (see `docs/reports/t0-published-numbers.md`), so this is not yet a same-model apples-to-apples row; it is the closest available until t0-beta is ported (GOAL.md's open question on which checkpoint to claim against). `int8-theirs` (their recipe, our checkpoint, our case generator) is our best current apples-to-apples proxy for the *recipe*: worst-case mean drift 0.8494% is above their 0.2271% but with a different model size and a different (undocumented, hence reconstructed) case generator, so this gap should not be read as "our INT8 recipe is worse" — it may equally reflect t0-alpha's smaller embed_dim (512 vs 1024) being more sensitive to per-channel quantization, or a harder case distribution. Q4_0 clearly exceeds their 2%/10% acceptance gates; Q8_0 and int8-theirs are within both gates; f16 is far inside both.
 
+**Compute class**: their published `t0-alpha-onnx-int8` card states, verbatim, **"INT8-weight, FP32-compute"** (`docs/reports/t0-published-numbers.md`) — same compute precision as our Q8_0 (INT8-class weights, F32 compute throughout the forward pass, dequant happens once at load). The Q8_0-vs-`int8-theirs` drift row above (0.53%/1.78% vs 0.85%/2.04%, both against our F32 reference, same checkpoint) is therefore apples to apples on compute, not just on the quantization recipe.
+
 Analysis: `docs/runs/2026-09-19-milestone1a.md`.
 
 ## GIFT-Eval subset — reference F32 vs ours F32/f16/Q8_0/Q4_0, t0-alpha
@@ -201,6 +203,8 @@ Analysis: `docs/runs/2026-09-19-gifteval-subset.md`.
 | Q4_0 | 58.6 | 0.362 | 424.2 |
 | wgpu (Metal), all quants | — | — | pending (GPU busy) |
 | WebGPU (browser), all quants | — | — | pending (GPU busy) |
+
+Compute class: all rows here run F32 compute (dequant to F32 happens once at load, matmuls are F32 regardless of storage quant) — the same "INT8-weight, FP32-compute" class their `t0-alpha-onnx-int8` card states for its export (`docs/reports/t0-published-numbers.md`). Latency comparisons against their numbers, once available, are therefore apples to apples on compute precision, not just on file size.
 
 Analysis: `docs/runs/2026-09-19-latency-cpu.md`.
 

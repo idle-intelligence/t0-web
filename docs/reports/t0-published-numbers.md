@@ -51,7 +51,11 @@ names it as one.
 - Artifact `t0-alpha-grouped-int8.onnx`: 107.2 MB.
 - Quantization: "per-channel signed INT8 weight quantization with FP32
   activations" — no per-matrix breakdown given on this card (contrast with
-  the beta INT8 card below, which does give one).
+  the beta INT8 card below, which does give one). The card also states,
+  of this export generally: **"INT8-weight, FP32-compute."** Compute
+  precision is therefore the same class as our own Q8_0 (INT8-class
+  weights, F32 compute) — see `docs/BENCHMARKS.md`'s drift and latency
+  sections for what that means for the comparisons there.
 - Validation: 17 CPU/WebGPU parity cases; context range tested 1–4096,
   target rows 1–64, covariate rows 0–64, compute horizons 32–1024; ONNX
   opset 20. No drift numbers on this card (drift is only quantified on the
