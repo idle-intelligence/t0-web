@@ -280,13 +280,41 @@ pub fn forecast<B: Backend>(
     device: &B::Device,
     want_trace: bool,
 ) -> (Vec<f32>, Option<Trace<B>>) {
+    let raw = TimeSeries::from_context(context, v, t_ctx, horizon);
+    forecast_series(model, raw, t_ctx, horizon, device, want_trace)
+}
+
+/// Batched forecast over `n_signals` independent univariate series (see
+/// `TimeSeries::from_context_batch`): one forward pass, `v = n_signals`,
+/// each signal isolated from the others by a distinct group id so
+/// cross-variate group-attention layers never mix them.
+pub fn forecast_batch<B: Backend>(
+    model: &T0Model<B>,
+    contexts: &[f32],
+    n_signals: usize,
+    t_ctx: usize,
+    horizon: usize,
+    device: &B::Device,
+) -> Vec<f32> {
+    let raw = TimeSeries::from_context_batch(contexts, n_signals, t_ctx, horizon);
+    forecast_series(model, raw, t_ctx, horizon, device, false).0
+}
+
+fn forecast_series<B: Backend>(
+    model: &T0Model<B>,
+    raw: TimeSeries,
+    t_ctx: usize,
+    horizon: usize,
+    device: &B::Device,
+    want_trace: bool,
+) -> (Vec<f32>, Option<Trace<B>>) {
     let cfg = &model.config;
     let patch_size = cfg.patch_size;
+    let v = raw.v;
     assert_eq!(t_ctx % patch_size, 0, "context_len must be patch-aligned for this milestone");
     assert_eq!(horizon % patch_size, 0, "horizon must be patch-aligned for this milestone");
     assert!(t_ctx + horizon <= 1024, "beyond max_horizon needs autoregressive rollout (unimplemented)");
 
-    let raw = TimeSeries::from_context(context, v, t_ctx, horizon);
     let window = raw.pad(patch_size, t_ctx); // no-op here since t_ctx is patch-aligned
 
     let scaler = CausalScaler::new(cfg.scaler_use_arcsinh, cfg.scaler_eps, &cfg.scaler_eps_mode);

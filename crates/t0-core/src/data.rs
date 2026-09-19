@@ -85,6 +85,25 @@ impl TimeSeries {
         }
     }
 
+    /// Batch of `n_signals` independent univariate series (each its own
+    /// `[t_ctx]` row in `contexts`, row-major `[n_signals, t_ctx]`), each
+    /// given a distinct group id so the cross-variate group-attention layers
+    /// (`build_group_mask`, group-id equality) never let one signal attend
+    /// to another — this is the whole batching mechanism, no model.rs
+    /// changes needed. Contrast with `from_context`'s `v>1` path, which
+    /// shares group id 0 across rows for genuine multivariate/joint
+    /// forecasting.
+    pub fn from_context_batch(contexts: &[f32], n_signals: usize, t_ctx: usize, horizon: usize) -> Self {
+        assert_eq!(contexts.len(), n_signals * t_ctx);
+        let mut series = Self::from_context(contexts, n_signals, t_ctx, horizon);
+        for row in 0..n_signals {
+            for col in 0..series.t {
+                series.group_ids[row * series.t + col] = row as i64;
+            }
+        }
+        series
+    }
+
     /// Pad so context and forecast region both land on whole patches, per
     /// `Patcher.pad`. `context_end` is the first `WITHHELD` column shared by
     /// all target rows (== `t_ctx` for inputs built by `from_context`).
