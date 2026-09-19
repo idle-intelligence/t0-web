@@ -129,7 +129,31 @@ impl<B: Backend> T0Model<B> {
     /// quantile head. `series` must already be scaled (arcsinh'd) and
     /// patch-aligned. Returns `[v, p, patch_size, n_quantiles]` flattened
     /// row-major, plus (optionally) the patch-embedding / layer-0 trace.
+    ///
+    /// Synchronous GPU readback (`Tensor::into_data()`): fine on native
+    /// wgpu/Metal and on the CPU `ndarray` backend, but a deadlock hazard on
+    /// `wgpu` in a real browser (WebGPU readback is only ever async there).
+    /// Never call this from WASM when built against `wgpu` — use
+    /// `forward_async` instead (see `crates/t0-wasm/README.md`).
     pub fn forward(&self, series: &TimeSeries, device: &B::Device, want_trace: bool) -> (Vec<f32>, Option<Trace<B>>) {
+        let (out, trace) = self.forward_tensor(series, device, want_trace);
+        let data = out.into_data();
+        let raw: Vec<f32> = data.iter::<f32>().collect();
+        (raw, trace)
+    }
+
+    /// Same as `forward`, but reads the final tensor back with
+    /// `into_data_async().await` instead of the synchronous `into_data()`.
+    /// This is the one that's safe to call from `t0-wasm` when built with
+    /// the `wgpu` feature for a browser target.
+    pub async fn forward_async(&self, series: &TimeSeries, device: &B::Device, want_trace: bool) -> (Vec<f32>, Option<Trace<B>>) {
+        let (out, trace) = self.forward_tensor(series, device, want_trace);
+        let data = out.into_data_async().await.expect("GPU readback failed");
+        let raw: Vec<f32> = data.iter::<f32>().collect();
+        (raw, trace)
+    }
+
+    fn forward_tensor(&self, series: &TimeSeries, device: &B::Device, want_trace: bool) -> (Tensor<B, 1>, Option<Trace<B>>) {
         let cfg = &self.config;
         let v = series.v;
         let patch_size = cfg.patch_size;
@@ -184,14 +208,12 @@ impl<B: Backend> T0Model<B> {
         let decoded = decoded.reshape([v * p * patch_size, n_q]);
         let out = quantile_head(decoded, n_q);
         let out: Tensor<B, 1> = out.reshape([v * p * patch_size * n_q]);
-        let data = out.into_data();
-        let raw: Vec<f32> = data.iter::<f32>().collect();
 
         let trace = patch_embedding_trace.map(|pe| Trace {
             patch_embedding: pe,
             layer0_output: layer0_output_trace.expect("layer0 trace set when want_trace is true"),
         });
-        (raw, trace)
+        (out, trace)
     }
 
     fn forward_layer(
@@ -284,6 +306,22 @@ pub fn forecast<B: Backend>(
     forecast_series(model, raw, t_ctx, horizon, device, want_trace)
 }
 
+/// Same as `forecast`, but via `T0Model::forward_async` (`into_data_async().await`
+/// readback) — the one safe to call from `t0-wasm`'s `wgpu` feature in a
+/// browser. See `T0Model::forward_async`'s doc comment.
+pub async fn forecast_async<B: Backend>(
+    model: &T0Model<B>,
+    context: &[f32],
+    v: usize,
+    t_ctx: usize,
+    horizon: usize,
+    device: &B::Device,
+    want_trace: bool,
+) -> (Vec<f32>, Option<Trace<B>>) {
+    let raw = TimeSeries::from_context(context, v, t_ctx, horizon);
+    forecast_series_async(model, raw, t_ctx, horizon, device, want_trace).await
+}
+
 /// Default chunk size for `forecast_batch`'s wgpu-safe chunked execution.
 /// `cubek-matmul`'s autotune picks a group-attention matmul tile that needs
 /// 40 KB of shared memory on shapes with `n_signals > 16` (`v`/`n_signals`
@@ -342,17 +380,25 @@ pub fn forecast_batch_chunked<B: Backend>(
     out
 }
 
-fn forecast_series<B: Backend>(
+/// Shared pre-`model.forward`/`forward_async` setup for `forecast_series`
+/// and `forecast_series_async`: patch-align padding + causal scaling.
+/// Returns the scaled+padded window, the scaler's loc/scale (for
+/// rescaling predictions afterward), and the padded context/horizon sizes.
+struct PreparedWindow {
+    window: TimeSeries,
+    loc_scale: crate::scaler::LocScale,
+    padded_t_ctx: usize,
+    padded_horizon: usize,
+}
+
+fn forecast_series_prepare<B: Backend>(
     model: &T0Model<B>,
     raw: TimeSeries,
     t_ctx: usize,
     horizon: usize,
-    device: &B::Device,
-    want_trace: bool,
-) -> (Vec<f32>, Option<Trace<B>>) {
+) -> (TimeSeries, PreparedWindow) {
     let cfg = &model.config;
     let patch_size = cfg.patch_size;
-    let v = raw.v;
 
     // GIFT-Eval windows aren't patch-aligned (e.g. horizon=30 for daily
     // series, horizon=8 for weekly) — round context/horizon up to whole
@@ -375,11 +421,32 @@ fn forecast_series<B: Backend>(
     let scaler = CausalScaler::new(cfg.scaler_use_arcsinh, cfg.scaler_eps, &cfg.scaler_eps_mode);
     let (scaled, loc_scale) = scaler.scale_input(&window);
 
-    let (mut predictions, trace) = model.forward(&scaled, device, want_trace);
+    (
+        scaled,
+        PreparedWindow { window, loc_scale, padded_t_ctx, padded_horizon },
+    )
+}
 
+/// Shared post-`model.forward`/`forward_async` finish for `forecast_series`
+/// and `forecast_series_async`: rescale predictions back out of the
+/// causal-scaled space, then slice out the forecast region.
+fn forecast_series_finish<B: Backend>(
+    model: &T0Model<B>,
+    mut predictions: Vec<f32>,
+    trace: Option<Trace<B>>,
+    prepared: &PreparedWindow,
+    v: usize,
+    horizon: usize,
+) -> (Vec<f32>, Option<Trace<B>>) {
+    let PreparedWindow { window, loc_scale, padded_t_ctx, padded_horizon } = prepared;
+    let padded_t_ctx = *padded_t_ctx;
+    let padded_horizon = *padded_horizon;
+    let cfg = &model.config;
+    let patch_size = cfg.patch_size;
+    let scaler = CausalScaler::new(cfg.scaler_use_arcsinh, cfg.scaler_eps, &cfg.scaler_eps_mode);
     let n_patches = window.n_patches(patch_size);
     let n_q = cfg.n_quantiles();
-    scaler.rescale_predictions(&mut predictions, &loc_scale, patch_size, n_patches, n_q);
+    scaler.rescale_predictions(&mut predictions, loc_scale, patch_size, n_patches, n_q);
 
     // Slice out the forecast region: patches [context_patches-1, +horizon_patches),
     // the decoder's next-patch prediction shifted by one (see model.rs's doc
@@ -407,4 +474,33 @@ fn forecast_series<B: Backend>(
         out[dst..dst + horizon * n_q].copy_from_slice(&padded_out[src..src + horizon * n_q]);
     }
     (out, trace)
+}
+
+fn forecast_series<B: Backend>(
+    model: &T0Model<B>,
+    raw: TimeSeries,
+    t_ctx: usize,
+    horizon: usize,
+    device: &B::Device,
+    want_trace: bool,
+) -> (Vec<f32>, Option<Trace<B>>) {
+    let v = raw.v;
+    let (scaled, prepared) = forecast_series_prepare(model, raw, t_ctx, horizon);
+    let (predictions, trace) = model.forward(&scaled, device, want_trace);
+    forecast_series_finish(model, predictions, trace, &prepared, v, horizon)
+}
+
+/// Same as `forecast_series`, but via `T0Model::forward_async`.
+async fn forecast_series_async<B: Backend>(
+    model: &T0Model<B>,
+    raw: TimeSeries,
+    t_ctx: usize,
+    horizon: usize,
+    device: &B::Device,
+    want_trace: bool,
+) -> (Vec<f32>, Option<Trace<B>>) {
+    let v = raw.v;
+    let (scaled, prepared) = forecast_series_prepare(model, raw, t_ctx, horizon);
+    let (predictions, trace) = model.forward_async(&scaled, device, want_trace).await;
+    forecast_series_finish(model, predictions, trace, &prepared, v, horizon)
 }

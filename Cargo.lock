@@ -3818,6 +3818,7 @@ dependencies = [
  "getrandom 0.3.4",
  "t0-core",
  "wasm-bindgen",
+ "wasm-bindgen-futures",
 ]
 
 [[package]]

@@ -1,7 +1,9 @@
 /target
 /.venv
 crates/t0-wasm/pkg/
+crates/t0-wasm/pkg-wgpu/
 web/pkg/
+web/pkg-wgpu/
 web/models/
 node_modules/
 __pycache__/

@@ -223,26 +223,38 @@ wgpu is slower than native ndarray CPU at this batch size (n_signals=1) — expe
 
 ### WebGPU (browser)
 
-Pending — see `crates/t0-wasm/README.md`'s WebGPU wiring status and `docs/runs/2026-09-19-web-smoke.md`.
+- Machine: Apple M2 (Darwin 25.3.0), Playwright's bundled Chromium-for-Testing (`chromium-1229`, `150.0.7871.24`), GPU confirmed idle before this run.
+- **No special launch flags needed**: `navigator.gpu` exposes a real hardware Metal adapter over `http://` origins by default in this Chromium revision (`--enable-unsafe-webgpu`/`--use-angle=metal` not required, not passed). See `crates/t0-wasm/README.md`'s "WebGPU status" for the two wiring hazards fixed (sync-readback deadlock, lazy-sync-device-init panic) and `docs/runs/2026-09-19-web-smoke.md` for the full run.
+- Command: same headless script, same page, `web/worker.js` auto-selects `pkg-wgpu` because `navigator.gpu` is present.
+
+| origin | ms/forecast | backend |
+|---|---|---|
+| 500 | 173.0 | webgpu |
+| 3600 | 177.5 | webgpu |
+| 7000 | 177.0 | webgpu |
+
+Result: PASS, avg 175.8 ms/forecast, Q8_0, ctx capped 512, horizon 32 — markedly faster than this page's own WASM-CPU/ndarray run (896.8 ms, below) and than native wgpu single-signal (704.6-945.6 ms, table above), though the CPU-side comparisons here had concurrent native build contention (see `docs/runs/2026-09-19-web-smoke.md`) so treat the exact ratio as indicative, not a controlled multiplier.
 
 Compute class: every row above runs F32 compute (dequant to F32 happens once at load, matmuls are F32 regardless of storage quant) — the same "INT8-weight, FP32-compute" class their `t0-alpha-onnx-int8` card states for its export (`docs/reports/t0-published-numbers.md`). Latency comparisons against their numbers, once available, are therefore apples to apples on compute precision, not just on file size.
 
-## Web smoke test (WASM CPU/ndarray, headless Chromium)
+## Web smoke test (WASM CPU/ndarray and WebGPU, headless Chromium)
 
-- Machine: Apple M2 (Darwin 25.3.0), Playwright's bundled Chromium-for-Testing, GPU occupied by `llm-life train-a` throughout — WebGPU pending.
+- Machine: Apple M2 (Darwin 25.3.0), Playwright's bundled Chromium-for-Testing.
 - Commit: this doc's commit.
 - Series: `web/data/series.f32`, real public series `us_births` (daily US
   births, 1969-01-01 to 1988-12-31, 7305 points; GIFT-Eval `us_births/D`,
   same config as the GIFT-Eval subset table above) — replaces the earlier
   synthetic 640-point placeholder. Source + license: `web/data/README.md`.
-- Command: `node scripts/headless/run.mjs --url http://127.0.0.1:8031/ --origins 500,3600,7000` (`python3 web/serve.py --port 8031` serving `web/`).
+- Command: `node scripts/headless/run.mjs --url http://127.0.0.1:8031/ --origins 500,3600,7000` (`python3 web/serve.py --port 8031` serving `web/`). Backend is auto-selected by `web/worker.js` (`navigator.gpu` present → WebGPU, else CPU/ndarray) — this Chromium has `navigator.gpu` by default, so it exercises WebGPU unless forced off.
+
+CPU (ndarray), origin dates and context lengths (see `docs/runs/2026-09-19-web-smoke.md` for the windowed-instrument UI rewrite that landed between these two runs — numbers below carried concurrent native-build CPU contention, noted there):
 
 | origin | origin date | context len | ms/forecast | length_ok | finite | monotone |
 |---|---|---|---|---|---|---|
-| 500 | 1970-05-16 | 500 | 599.9 | true | true | true |
-| 3600 | 1978-11-14 | 512 (capped) | 610.9 | true | true | true |
-| 7000 | 1988-02-25 | 512 (capped) | 592.4 | true | true | true |
+| 500 | 1970-05-16 | 500 | 846.6 | true | true | true |
+| 3600 | 1978-11-14 | 512 (capped) | 942.9 | true | true | true |
+| 7000 | 1988-02-25 | 512 (capped) | 900.9 | true | true | true |
 
-Result: PASS, avg 601.1 ms/forecast. Slower than native CPU (363-424 ms, same Q8_0 quant, table above) because `t0-wasm`'s WASM build has no SIMD128/threading enabled and runs single-threaded, vs native ndarray's 8 threads.
+WebGPU, same page/series/quant, GPU confirmed idle: 173.0 / 177.5 / 177.0 ms (table above). Both backends: PASS on every gate (length, finite, monotone, MAE/sMAPE finite, drag produces exactly one forecast, slider `input`-only leaves the log line count unchanged).
 
 Analysis: `docs/runs/2026-09-19-web-smoke.md`.
