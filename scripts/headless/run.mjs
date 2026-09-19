@@ -1,14 +1,20 @@
 // Headless smoke test for web/index.html: loads the page in Playwright's
 // bundled Chromium (never the maintainer's real browser -- CLAUDE.md).
 //
-// No origin control of any kind on this page (removed per owner override):
-// the data (US births, July-November 1988) and the origin (December 1,
-// 1988) are fixed. The model forecasts once, automatically on load (also
-// re-runnable via the single "Forecast" button). This script covers:
+// The plotted history (US births, July-November 1988) never changes; only
+// the origin (where the forecast starts) is draggable within it, drawn on
+// the INPUT canvas as a 1px dashed line + hollow circle (no native
+// control). This script covers:
 //   1. page loads, the automatic forecast runs exactly once.
 //   2. the forecast is 32 points x 5 quantiles, all finite.
-//   3. MAE is computed against the real December 1988 values and is finite.
-//   4. no range/color/native slider inputs anywhere in the DOM.
+//   3. inside-band / CRPS / vs-weekly-naive are finite and sane (inside
+//      band in [0, horizon], naive ratio > 0).
+//   4. a real mouse drag on the INPUT chart produces exactly one forecast
+//      (debounced, commit-on-release -- not one per pointermove).
+//   5. dragging never changes the drawn data (checksum of the July-
+//      November window before/after) and the origin is clamped within
+//      window.__app.originBounds().
+//   6. no range/color/native slider inputs anywhere in the DOM.
 //
 // Backend is auto-selected by web/worker.js (WebGPU if navigator.gpu
 // exists, else WASM CPU/burn-ndarray) -- this bundled Chromium-for-Testing
@@ -89,15 +95,25 @@ async function main() {
       throw new Error(`forecast shape/finite gate failed: ${JSON.stringify({ lengthOk, allFinite, horizon, nQuantiles, len: quantiles.length })}`);
     }
 
-    const { mae, smape } = await page.evaluate(() => ({
-      mae: document.getElementById('metricMae').textContent,
-      smape: document.getElementById('metricSmape').textContent,
+    const { inside, crps, naive } = await page.evaluate(() => ({
+      inside: document.getElementById('metricInside').textContent,
+      crps: document.getElementById('metricCrps').textContent,
+      naive: document.getElementById('metricNaive').textContent,
     }));
-    const metricsFinite = Number.isFinite(parseFloat(mae)) && Number.isFinite(parseFloat(smape));
-    console.log(`MAE=${mae} sMAPE=${smape}% (against real December 1988 values) finite=${metricsFinite}`);
-    if (!metricsFinite) {
-      throw new Error(`MAE/sMAPE not finite: MAE=${mae} sMAPE=${smape}`);
+    const insideCount = parseInt(inside.split('/')[0], 10);
+    const crpsFinite = Number.isFinite(parseFloat(crps));
+    const naiveVal = parseFloat(naive);
+    console.log(`inside band=${inside} CRPS=${crps} vs weekly naive=${naive}`);
+    if (!Number.isFinite(insideCount) || insideCount < 0 || insideCount > horizon) {
+      throw new Error(`inside-band count out of [0, ${horizon}]: ${inside}`);
     }
+    if (!crpsFinite) {
+      throw new Error(`CRPS not finite: ${crps}`);
+    }
+    if (!Number.isFinite(naiveVal) || naiveVal <= 0) {
+      throw new Error(`vs-weekly-naive ratio not finite/positive: ${naive}`);
+    }
+    report.metrics = { inside, crps, naive };
 
     // --- no range/native slider inputs anywhere on the page ---
     const inputCounts = await page.evaluate(() => ({
@@ -107,18 +123,44 @@ async function main() {
     }));
     console.log(`input elements: ${JSON.stringify(inputCounts)}`);
     if (inputCounts.total !== 0) {
-      throw new Error(`page has ${inputCounts.total} <input> element(s), expected 0 (no origin control of any kind)`);
+      throw new Error(`page has ${inputCounts.total} <input> element(s), expected 0 (no native origin control)`);
     }
 
-    // --- STATUS text passes through the expected states ---
-    const statusText = await page.evaluate(() => document.getElementById('status-text').textContent);
-    console.log(`final STATUS text: "${statusText}"`);
-    if (!/^forecast in \d+ ms$/.test(statusText)) {
-      throw new Error(`STATUS text after the automatic forecast should be "forecast in <ms> ms", got "${statusText}"`);
+    // --- drag on the INPUT chart -> exactly one forecast, data unchanged, origin clamped ---
+    const checksumBefore = await page.evaluate(() => window.__app.seriesChecksum());
+    const before = await page.evaluate(() => window.__app.forecastCount);
+    await page.locator('#inputChart').scrollIntoViewIfNeeded();
+    const box = await page.locator('#inputChart').boundingBox();
+    const y = box.y + box.height / 2;
+    // drag well past the left edge -- must clamp, not error or run off-bounds
+    await page.mouse.move(box.x + box.width * 0.9, y);
+    await page.mouse.down();
+    for (const frac of [0.6, 0.3, 0.05, 0.0]) {
+      await page.mouse.move(box.x + box.width * frac, y);
+      await page.waitForTimeout(20);
+    }
+    await page.mouse.up();
+    await page.waitForFunction((n) => window.__app.forecastCount > n, before, { timeout: 10000 });
+    await page.waitForTimeout(300); // settle in case of a stray second trigger
+    const after = await page.evaluate(() => window.__app.forecastCount);
+    const dragDelta = after - before;
+    const originAfter = await page.evaluate(() => window.__app.origin());
+    const bounds = await page.evaluate(() => window.__app.originBounds());
+    const checksumAfter = await page.evaluate(() => window.__app.seriesChecksum());
+    console.log(`drag: forecastCount ${before} -> ${after} (delta ${dragDelta}), origin -> ${originAfter}, bounds ${JSON.stringify(bounds)}`);
+    console.log(`series checksum: ${checksumBefore} -> ${checksumAfter}`);
+    if (dragDelta !== 1) {
+      throw new Error(`drag produced ${dragDelta} forecasts, expected exactly 1`);
+    }
+    if (checksumAfter !== checksumBefore) {
+      throw new Error(`drag changed the drawn series data (checksum ${checksumBefore} -> ${checksumAfter})`);
+    }
+    if (originAfter < bounds.lo || originAfter > bounds.hi) {
+      throw new Error(`origin ${originAfter} not clamped within [${bounds.lo}, ${bounds.hi}]`);
     }
 
     report.pass = true;
-    console.log(`\nPASS -- forecast ${ms.toFixed(1)} ms, MAE ${mae}, sMAPE ${smape}% (backend: ${backend})`);
+    console.log(`\nPASS -- forecast ${ms.toFixed(1)} ms, inside band ${inside}, CRPS ${crps}, vs weekly naive ${naive} (backend: ${backend})`);
   } catch (err) {
     report.error = String(err && err.message ? err.message : err);
     console.log('FAIL:', report.error);

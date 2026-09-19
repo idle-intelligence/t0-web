@@ -115,6 +115,7 @@
             border: 1px solid var(--border);
             background: var(--bg);
         }
+        #inputChart { cursor: crosshair; touch-action: none; }
         .info {
             font-size: 13px;
             color: var(--faint);
@@ -146,6 +147,30 @@
             opacity: 0.3;
             cursor: not-allowed;
         }
+        .series-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+        .series-btn {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 12px;
+            padding: 8px 12px;
+            cursor: pointer;
+            border: 1px solid var(--border);
+            background: transparent;
+            color: var(--text);
+            text-align: center;
+            transition: border-color 0.15s;
+        }
+        .series-btn:hover:not(:disabled) { border-color: var(--text); }
+        .series-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+        .series-btn.active {
+            background: var(--text);
+            color: var(--bg);
+            border-color: var(--text);
+        }
         .legend {
             display: flex;
             justify-content: space-between;
@@ -157,11 +182,17 @@
             color: var(--muted);
             font-family: 'IBM Plex Mono', monospace;
         }
-        .legend .left span, .legend .right span { margin-right: 12px; }
-        .legend .left span:last-child, .legend .right span:last-child { margin-right: 0; }
-        .swatch-line { color: var(--text); }
-        .swatch-line.forecast { color: #666; }
-        .swatch-box { color: #bbb; }
+        .legend .left span { margin-right: 12px; }
+        .legend .left span:last-child { margin-right: 0; }
+        .swatch-actual { color: var(--text); letter-spacing: 1px; }
+        .swatch-forecast { color: var(--muted); }
+        .swatch-band { color: #bbb; }
+        .panel-desc {
+            font-size: 12px;
+            color: var(--faint);
+            margin-top: 6px;
+            line-height: 1.5;
+        }
 
         #metricsCard { display: none; }
         .metrics-grid {
@@ -230,28 +261,30 @@
 
     <section>
         <h2>INPUT <span class="sub">· US births, daily</span></h2>
+        <div class="series-grid" id="seriesGrid"></div>
         <canvas id="inputChart" class="io-chart"></canvas>
-        <p class="info">US births per day, July to November 1988. The model forecasts December from here.</p>
+        <p class="info">US births per day, July to November 1988. Drag the origin to choose where the model forecasts from.</p>
         <div class="actions">
             <button id="forecastBtn" type="button" disabled>Forecast</button>
         </div>
     </section>
 
     <section>
-        <h2>OUTPUT <span class="sub">· December 1988 forecast</span></h2>
+        <h2>OUTPUT <span class="sub">· 32-day forecast</span></h2>
         <canvas id="outputChart" class="io-chart"></canvas>
         <div class="legend">
             <span class="left">
-                <span><span class="swatch-line">—</span> Actual</span>
-                <span><span class="swatch-line forecast">—</span> Forecast</span>
-                <span><span class="swatch-box">▮</span> Q10–Q90</span>
+                <span><span class="swatch-actual">•••</span> actual</span>
+                <span><span class="swatch-forecast">—</span> forecast</span>
+                <span><span class="swatch-band">▮</span> Q10–Q90</span>
             </span>
             <span class="right">
-                <span>MAE <span id="metricMae">—</span></span>
-                <span>sMAPE <span id="metricSmape">—</span>%</span>
-                <span>LATENCY <span id="metricLatencyInline">—</span>ms</span>
+                inside band <span id="metricInside">—</span> ·
+                CRPS <span id="metricCrps">—</span> ·
+                vs weekly naive <span id="metricNaive">—</span>
             </span>
         </div>
+        <p class="panel-desc">Inside band: days whose real value fell within the 10–90% range; a well-calibrated band catches about 26 of 32. CRPS: error of the whole probabilistic forecast, in births per day, lower is better. Vs weekly naive: error relative to repeating last week; below 1 beats it.</p>
     </section>
 
     <section id="metricsCard">
@@ -285,6 +318,7 @@
     <script type="module">
         const statusDot = document.getElementById('statusDot');
         const statusTextEl = document.getElementById('status-text');
+        const seriesGrid = document.getElementById('seriesGrid');
         const inputCanvas = document.getElementById('inputChart');
         const inputCtx = inputCanvas.getContext('2d');
         const outputCanvas = document.getElementById('outputChart');
@@ -294,11 +328,13 @@
         const metricMs = document.getElementById('metricMs');
         const metricSize = document.getElementById('metricSize');
         const metricBackend = document.getElementById('metricBackend');
-        const metricMae = document.getElementById('metricMae');
-        const metricSmape = document.getElementById('metricSmape');
-        const metricLatencyInline = document.getElementById('metricLatencyInline');
+        const metricInside = document.getElementById('metricInside');
+        const metricCrps = document.getElementById('metricCrps');
+        const metricNaive = document.getElementById('metricNaive');
 
         const PAD_L = 44, PAD_R = 8, PAD_T = 10, PAD_B = 20;
+        const MIN_PRECEDING_DAYS = 60; // at least this many drawn days before the origin
+        const QLEVELS = [0.1, 0.25, 0.5, 0.75, 0.9]; // t0-alpha/t0-beta's trained quantile levels
 
         // STATUS is a single line, replaced as state changes: "downloading
         // model: N%" -> "model loaded, <backend>" -> "forecast in <ms> ms".
@@ -325,15 +361,17 @@
         let nQuantiles = 5;
         let seriesStartDate = null;
 
-        // No origin control of any kind: the data and the origin are fixed,
-        // chosen for this page (a Christmas/New Year dip is visible in the
-        // real December 1988 continuation). INPUT_WINDOW is the history the
-        // chart draws (the model also gets earlier points as context, up to
-        // 512, undrawn -- see web/worker.js's CONTEXT_CAP).
+        // The drawn history (July-November 1988) never changes. Only the
+        // origin -- where the forecast starts -- is draggable within it,
+        // clamped so at least MIN_PRECEDING_DAYS precede it and the horizon
+        // still ends by the last real day (see clampOrigin below).
         let INPUT_WINDOW = null;
-        let ORIGIN = null;
+        let ORIGIN = null;       // committed origin: drives the forecast data
+        let markerOrigin = null; // visual-only during drag/preview
         let lastForecast = null;
         let forecasting = false;
+        let requestIdCounter = 0;
+        let debounceTimer = null;
 
         function dateAt(i) {
             const start = new Date(seriesStartDate.replace(' ', 'T') + 'Z');
@@ -345,12 +383,35 @@
             return Math.round((d.getTime() - start.getTime()) / 86400000);
         }
 
+        // Origin bounds: at least MIN_PRECEDING_DAYS drawn days precede it,
+        // and origin + horizon - 1 must not exceed the series' last index
+        // (the horizon has to end by the last real day, 1988-12-31).
+        function clampOrigin(o) {
+            if (!INPUT_WINDOW) return Math.round(o);
+            const lo = INPUT_WINDOW.start + MIN_PRECEDING_DAYS;
+            const hi = series.length - 1 - horizon + 1;
+            return Math.min(hi, Math.max(lo, Math.round(o)));
+        }
+
         window.__app = {
             ready: false,
             lastForecast: null,
             forecastCount: 0, // incremented once per accepted forecast response -- test hook
             runForecast() {
                 runForecast();
+            },
+            originBounds() {
+                if (!INPUT_WINDOW) return null;
+                return { lo: INPUT_WINDOW.start + MIN_PRECEDING_DAYS, hi: series.length - horizon };
+            },
+            origin() {
+                return ORIGIN;
+            },
+            seriesChecksum() {
+                if (!series || !INPUT_WINDOW) return null;
+                let h = 0;
+                for (let i = INPUT_WINDOW.start; i <= INPUT_WINDOW.end; i++) h = (h * 31 + series[i]) % 1000000007;
+                return h;
             },
         };
 
@@ -399,13 +460,36 @@
                     ctx.lineTo(x, h - PAD_B);
                     ctx.stroke();
                     const label = d.toLocaleDateString('en-US', { month: 'short' });
-                    ctx.fillText(label, x + 2, h - 6);
+                    ctx.textAlign = x > w - 30 ? 'right' : 'left';
+                    ctx.fillText(label, x > w - 30 ? x - 2 : x + 2, h - 6);
+                    ctx.textAlign = 'left';
                 }
             }
         }
 
-        // ---- INPUT: the fixed history window, July-November 1988. No
-        // origin control -- static data, chosen once for this page.
+        // Origin bar: 1px dashed vertical line in family gray with a small
+        // hollow circle at the top (canvas-drawn, no native control; the
+        // drag hit area is the whole canvas, invisible).
+        function drawOriginMarker(ctx, x, h) {
+            ctx.strokeStyle = '#999';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([3, 3]);
+            ctx.beginPath();
+            ctx.moveTo(x, PAD_T);
+            ctx.lineTo(x, h - PAD_B);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.beginPath();
+            ctx.arc(x, PAD_T, 3.5, 0, Math.PI * 2);
+            ctx.strokeStyle = '#555';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+        }
+
+        // ---- INPUT: the fixed history window, July-November 1988. The
+        // drawn data never changes; only the origin marker moves over it.
+        // Days after the origin are drawn lighter so the split reads at a
+        // glance (still real history -- the model just never sees them).
         function drawInputChart() {
             const { w, h } = fitCanvas(inputCanvas, inputCtx);
             inputCtx.clearRect(0, 0, w, h);
@@ -421,26 +505,37 @@
             const yAt = drawGridlines(inputCtx, w, h, xAt, domain);
             drawXTicks(inputCtx, w, h, xAt, start, end);
 
+            const o = markerOrigin ?? ORIGIN;
             inputCtx.strokeStyle = '#1a1a1a';
             inputCtx.lineWidth = 1.5;
             inputCtx.beginPath();
-            for (let i = start; i <= end; i++) {
+            for (let i = start; i <= o; i++) {
                 const x = xAt(i), y = yAt(series[i]);
                 if (i === start) inputCtx.moveTo(x, y); else inputCtx.lineTo(x, y);
             }
             inputCtx.stroke();
+
+            inputCtx.strokeStyle = '#ccc';
+            inputCtx.lineWidth = 1.5;
+            inputCtx.beginPath();
+            for (let i = o; i <= end; i++) {
+                const x = xAt(i), y = yAt(series[i]);
+                if (i === o) inputCtx.moveTo(x, y); else inputCtx.lineTo(x, y);
+            }
+            inputCtx.stroke();
+
+            drawOriginMarker(inputCtx, xAt(o), h);
         }
 
-        // ---- OUTPUT: the 32 days from December 1, 1988, own scale (32
-        // days stretched to fill the width -- forcing the same
-        // pixels-per-day as the ~5x-longer INPUT window would leave most of
-        // this canvas blank). Median, Q10-Q90 (+ Q25-Q75), and the real
-        // December values dashed -- shows whether the model anticipated the
-        // Christmas/New Year dip.
+        // ---- OUTPUT: the horizon days from the chosen origin, own scale
+        // (stretched to fill the width). Median (solid mid-gray), Q10-Q90
+        // (+ Q25-Q75, drawn darker via overlap) bands, and the real
+        // continuation as black dots drawn on top -- shows whether the
+        // model anticipated what actually happened.
         function drawOutputChart() {
             const { w, h } = fitCanvas(outputCanvas, outputCtx);
             outputCtx.clearRect(0, 0, w, h);
-            if (!series || !lastForecast) return;
+            if (!series || !lastForecast || lastForecast.origin !== ORIGIN) return;
             const { quantiles, horizon: hZ, nQuantiles: nq } = lastForecast;
             const q = (t, qi) => quantiles[t * nq + qi];
             const plotW = w - PAD_L - PAD_R;
@@ -476,6 +571,7 @@
                 }
             }
 
+            // Q10-Q90 (outer, light gray)
             outputCtx.fillStyle = 'rgba(0, 0, 0, 0.09)';
             outputCtx.beginPath();
             for (let t = 0; t < hZ; t++) outputCtx.lineTo(xAt(t), yAt(q(t, 0)));
@@ -483,8 +579,10 @@
             outputCtx.closePath();
             outputCtx.fill();
 
+            // Q25-Q75 (inner) -- overlaps the outer fill, reading visibly
+            // darker in the middle without needing a higher raw alpha.
             if (nq >= 5) {
-                outputCtx.fillStyle = 'rgba(0, 0, 0, 0.05)';
+                outputCtx.fillStyle = 'rgba(0, 0, 0, 0.09)';
                 outputCtx.beginPath();
                 for (let t = 0; t < hZ; t++) outputCtx.lineTo(xAt(t), yAt(q(t, 1)));
                 for (let t = hZ - 1; t >= 0; t--) outputCtx.lineTo(xAt(t), yAt(q(t, nq - 2)));
@@ -492,21 +590,7 @@
                 outputCtx.fill();
             }
 
-            // actual December 1988 values (dashed) -- last horizon day (Jan
-            // 1, 1989) has no ground truth, the series ends Dec 31, 1988.
-            outputCtx.strokeStyle = '#999';
-            outputCtx.lineWidth = 1.5;
-            outputCtx.setLineDash([4, 3]);
-            outputCtx.beginPath();
-            let started = false;
-            for (let t = 0; t < hZ; t++) {
-                if (ORIGIN + t >= series.length) break;
-                const x = xAt(t), y = yAt(series[ORIGIN + t]);
-                if (!started) { outputCtx.moveTo(x, y); started = true; } else outputCtx.lineTo(x, y);
-            }
-            outputCtx.stroke();
-            outputCtx.setLineDash([]);
-
+            // forecast median (solid mid-gray, 2px)
             const mid = Math.floor(nq / 2);
             outputCtx.strokeStyle = '#555';
             outputCtx.lineWidth = 2;
@@ -516,6 +600,25 @@
                 if (t === 0) outputCtx.moveTo(x, y); else outputCtx.lineTo(x, y);
             }
             outputCtx.stroke();
+
+            // actual continuation: dotted black, drawn last so it reads on
+            // top of the bands/median. Last horizon day (1989-01-01 when
+            // origin is at its latest, Nov 30) has no ground truth -- the
+            // series ends 1988-12-31.
+            outputCtx.strokeStyle = '#1a1a1a';
+            outputCtx.lineWidth = 2;
+            outputCtx.setLineDash([0.1, 6]);
+            outputCtx.lineCap = 'round';
+            outputCtx.beginPath();
+            let started = false;
+            for (let t = 0; t < hZ; t++) {
+                if (ORIGIN + t >= series.length) break;
+                const x = xAt(t), y = yAt(series[ORIGIN + t]);
+                if (!started) { outputCtx.moveTo(x, y); started = true; } else outputCtx.lineTo(x, y);
+            }
+            outputCtx.stroke();
+            outputCtx.setLineDash([]);
+            outputCtx.lineCap = 'butt';
         }
 
         function drawAll() {
@@ -523,31 +626,46 @@
             drawOutputChart();
         }
 
-        // ---- metrics (MAE / sMAPE / latency), against the real December
-        // values only (the last horizon day has no ground truth) ----
+        // ---- metrics: inside band, CRPS (2x mean pinball over the 5
+        // trained quantile levels), and MAE ratio vs a weekly-naive
+        // baseline (repeats the value from 7 days earlier) -- all computed
+        // against the real continuation only (days with no ground truth,
+        // e.g. the horizon's last day when origin is at its latest, are
+        // excluded from every one of these). ----
         function updateMetrics() {
-            if (!lastForecast) {
-                metricMae.textContent = '—';
-                metricSmape.textContent = '—';
-                metricLatencyInline.textContent = '—';
+            if (!lastForecast || lastForecast.origin !== ORIGIN) {
+                metricInside.textContent = '—';
+                metricCrps.textContent = '—';
+                metricNaive.textContent = '—';
                 metricMs.textContent = '—';
                 return;
             }
             const { quantiles, horizon: hZ, nQuantiles: nq, ms } = lastForecast;
             const mid = Math.floor(nq / 2);
-            let sae = 0, ssmape = 0, n = 0;
+            let inside = 0, pinballSum = 0, pinballCount = 0;
+            let saeMedian = 0, saeNaive = 0, n = 0;
             for (let t = 0; t < hZ; t++) {
                 if (ORIGIN + t >= series.length) continue;
                 const actual = series[ORIGIN + t];
+                const q0 = quantiles[t * nq + 0], qLast = quantiles[t * nq + nq - 1];
+                if (actual >= q0 && actual <= qLast) inside += 1;
+                for (let qi = 0; qi < nq; qi++) {
+                    const pred = quantiles[t * nq + qi];
+                    const lvl = QLEVELS[qi] ?? qi / (nq - 1);
+                    const err = actual - pred;
+                    pinballSum += err >= 0 ? err * lvl : -err * (1 - lvl);
+                    pinballCount += 1;
+                }
                 const pred = quantiles[t * nq + mid];
-                sae += Math.abs(actual - pred);
-                const denom = (Math.abs(actual) + Math.abs(pred)) / 2 || 1;
-                ssmape += Math.abs(actual - pred) / denom;
+                saeMedian += Math.abs(actual - pred);
+                saeNaive += Math.abs(actual - series[ORIGIN + t - 7]);
                 n += 1;
             }
-            metricMae.textContent = (sae / n).toFixed(1);
-            metricSmape.textContent = ((ssmape / n) * 100).toFixed(1);
-            metricLatencyInline.textContent = ms.toFixed(0);
+            const crps = 2 * (pinballSum / pinballCount);
+            const naiveRatio = (saeMedian / n) / (saeNaive / n);
+            metricInside.textContent = `${inside}/${hZ}`;
+            metricCrps.textContent = crps.toFixed(0);
+            metricNaive.textContent = naiveRatio.toFixed(2);
             metricMs.textContent = ms.toFixed(1);
         }
 
@@ -556,9 +674,73 @@
             forecasting = true;
             forecastBtn.disabled = true;
             setStatus('forecasting…');
-            worker.postMessage({ type: 'forecast', origin: ORIGIN, requestId: 1 });
+            requestIdCounter += 1;
+            worker.postMessage({ type: 'forecast', origin: ORIGIN, requestId: requestIdCounter });
         }
         forecastBtn.addEventListener('click', runForecast);
+
+        function scheduleForecast() {
+            if (debounceTimer) clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(runForecast, 150);
+        }
+
+        function commitOrigin(o) {
+            ORIGIN = clampOrigin(o);
+            markerOrigin = ORIGIN;
+            lastForecast = null;
+            drawAll();
+            updateMetrics();
+            if (window.__app.ready) scheduleForecast();
+        }
+
+        function previewMarker(o) {
+            markerOrigin = clampOrigin(o);
+            drawInputChart(); // cheap: only the marker line moves, OUTPUT is unchanged until release
+        }
+
+        // ---- origin bar: drag directly on the INPUT chart; release
+        // commits (forecasts). The drawn window itself never moves.
+        function originFromInputEvent(e) {
+            const rect = inputCanvas.getBoundingClientRect();
+            const { start, end } = INPUT_WINDOW;
+            const frac = Math.min(1, Math.max(0, (e.clientX - rect.left - PAD_L) / (rect.width - PAD_L - PAD_R)));
+            return start + frac * (end - start);
+        }
+        let dragging = false;
+        inputCanvas.addEventListener('pointerdown', (e) => {
+            if (!window.__app.ready) return;
+            dragging = true;
+            inputCanvas.setPointerCapture(e.pointerId);
+            previewMarker(originFromInputEvent(e));
+        });
+        inputCanvas.addEventListener('pointermove', (e) => {
+            if (!dragging) return;
+            previewMarker(originFromInputEvent(e));
+        });
+        inputCanvas.addEventListener('pointerup', () => {
+            if (!dragging) return;
+            dragging = false;
+            commitOrigin(markerOrigin);
+        });
+
+        // ---- series picker: prepared for more entries later, currently
+        // just the one active series (web/data/index.json). ----
+        async function loadSeriesIndex() {
+            try {
+                const list = await fetch('./data/index.json').then((r) => r.json());
+                seriesGrid.innerHTML = '';
+                for (const entry of list) {
+                    const btn = document.createElement('button');
+                    btn.className = 'series-btn active';
+                    btn.type = 'button';
+                    btn.textContent = entry.name;
+                    seriesGrid.appendChild(btn);
+                }
+            } catch (err) {
+                console.warn('[t0] could not load series index:', err);
+            }
+        }
+        loadSeriesIndex();
 
         worker.onmessage = (e) => {
             const msg = e.data;
@@ -572,8 +754,9 @@
                     horizon = msg.horizon;
                     nQuantiles = msg.nQuantiles;
                     seriesStartDate = msg.startDate;
-                    ORIGIN = dateToIndex('1988-12-01');
-                    INPUT_WINDOW = { start: dateToIndex('1988-07-01'), end: ORIGIN - 1 };
+                    INPUT_WINDOW = { start: dateToIndex('1988-07-01'), end: dateToIndex('1988-11-30') };
+                    ORIGIN = clampOrigin(dateToIndex('1988-11-30'));
+                    markerOrigin = ORIGIN;
                     metricsCard.style.display = 'block';
                     metricSize.textContent = formatBytes(msg.modelBytes);
                     metricBackend.textContent = msg.backend;
@@ -586,6 +769,7 @@
                     break;
                 }
                 case 'forecast': {
+                    if (msg.requestId !== requestIdCounter) break; // stale, a newer request superseded it
                     forecasting = false;
                     forecastBtn.disabled = false;
                     lastForecast = msg;
