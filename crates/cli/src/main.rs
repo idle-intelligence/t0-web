@@ -337,14 +337,16 @@ fn median(mut xs: Vec<f64>) -> f64 {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn cmd_bench(weights_path: &Path, config_path: Option<&Path>, n_signals: usize, t_ctx: usize, horizon: usize, reps: usize, chunk: usize) -> Result<()> {
+fn cmd_bench(weights_path: &Path, config_path: Option<&Path>, n_signals: usize, t_ctx: usize, horizon: usize, reps: usize, chunk: usize, warmup: usize) -> Result<()> {
     let file_size = std::fs::metadata(weights_path)?.len();
     let (model, load_time) = load_model(weights_path, config_path)?;
     let dev = device();
     let context = synthetic_sines(n_signals, t_ctx);
 
-    // 1 warm-up pass (not timed), then `reps` timed passes.
-    let _ = forecast_batch_chunked(&model, &context, n_signals, t_ctx, horizon, &dev, chunk);
+    // `warmup` untimed passes, then `reps` timed passes.
+    for _ in 0..warmup {
+        let _ = forecast_batch_chunked(&model, &context, n_signals, t_ctx, horizon, &dev, chunk);
+    }
     let mut times = Vec::with_capacity(reps);
     for _ in 0..reps {
         let t0 = Instant::now();
@@ -377,6 +379,7 @@ fn main() -> Result<()> {
     let mut horizon = 96usize;
     let mut reps = 5usize;
     let mut chunk = DEFAULT_BATCH_CHUNK;
+    let mut warmup = 1usize;
     let mut weights_f32: Option<PathBuf> = None;
     let mut cases = 54usize;
     let mut seed = 0u64;
@@ -435,6 +438,10 @@ fn main() -> Result<()> {
                 chunk = args[i + 1].parse()?;
                 i += 2;
             }
+            "--warmup" => {
+                warmup = args[i + 1].parse()?;
+                i += 2;
+            }
             "--weights-f32" => {
                 weights_f32 = Some(PathBuf::from(&args[i + 1]));
                 i += 2;
@@ -471,7 +478,7 @@ fn main() -> Result<()> {
         "export-gguf" => cmd_export_gguf(&weights, config.as_deref().ok_or_else(|| anyhow!("--config is required"))?, &quant, &out),
         "bench" => {
             check_backend_flag(&backend)?;
-            cmd_bench(&weights, config.as_deref(), n_signals, t_ctx, horizon, reps, chunk)
+            cmd_bench(&weights, config.as_deref(), n_signals, t_ctx, horizon, reps, chunk, warmup)
         }
         "gifteval" => cmd_gifteval(&manifest_dir, &weights, config.as_deref(), &gift_out),
         "drift" => {
