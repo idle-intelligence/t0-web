@@ -8,5 +8,5 @@ pub mod scaler;
 pub mod weights;
 
 pub use config::T0Config;
-pub use model::{forecast, forecast_batch, T0Model, Trace};
+pub use model::{forecast, forecast_batch, forecast_batch_chunked, T0Model, Trace, DEFAULT_BATCH_CHUNK};
 pub use weights::Weights;
