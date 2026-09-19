@@ -2,3 +2,7 @@
 /.venv
 __pycache__/
 *.pyc
+.env
+fixtures/gifteval/*.f32
+fixtures/gifteval/scores_*.csv
+fixtures/gifteval/forecasts_*/

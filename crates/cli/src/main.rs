@@ -45,6 +45,24 @@ struct Manifest {
 }
 
 #[derive(Deserialize)]
+struct GiftWindow {
+    context_len: usize,
+    context_file: String,
+}
+
+#[derive(Deserialize)]
+struct GiftTask {
+    config: String,
+    horizon: usize,
+    windows: Vec<GiftWindow>,
+}
+
+#[derive(Deserialize)]
+struct GiftManifest {
+    tasks: Vec<GiftTask>,
+}
+
+#[derive(Deserialize)]
 struct Case {
     name: String,
     v: usize,
@@ -121,6 +139,49 @@ fn cmd_parity(fixtures_dir: &Path, weights: &Path, config: Option<&Path>) -> Res
         return Err(anyhow!("parity gate failed: max-abs error {worst:.6e} exceeds 1e-4"));
     }
     println!("parity gate PASSED (<= 1e-4 max-abs)");
+    Ok(())
+}
+
+/// Forecasts every window of every task in a GIFT-Eval subset manifest
+/// (`tools/gifteval_subset.py`'s output) and writes one little-endian f32
+/// file per task: `n_windows * horizon * n_quantiles` values, window-major,
+/// then time-major, then quantile-major (quantile order == the model's
+/// trained `quantile_levels`, e.g. [0.1, 0.25, 0.5, 0.75, 0.9] for
+/// t0-alpha). Scoring (CRPS/MASE via gluonts, plus interpolating the
+/// trained quantiles up to GIFT-Eval's 9 query levels) happens in Python —
+/// see `tools/score_gifteval.py` — so the metric matches the official
+/// harness exactly, not a Rust reimplementation of it.
+fn cmd_gifteval(manifest_dir: &Path, weights: &Path, config: Option<&Path>, out_dir: &Path) -> Result<()> {
+    let manifest: GiftManifest = serde_json::from_str(&std::fs::read_to_string(manifest_dir.join("manifest.json"))?)?;
+    let (model, load_time) = load_model(weights, config)?;
+    println!("loaded in {:.3}s", load_time.as_secs_f64());
+    let dev = device();
+    std::fs::create_dir_all(out_dir)?;
+    let n_q = model.config.n_quantiles();
+
+    for task in &manifest.tasks {
+        let safe_name = task.config.replace('/', "_");
+        let mut out = Vec::with_capacity(task.windows.len() * task.horizon * n_q);
+        let t0 = Instant::now();
+        for window in &task.windows {
+            let context = read_f32(&manifest_dir.join(&window.context_file))?;
+            assert_eq!(context.len(), window.context_len);
+            let (q, _) = forecast(&model, &context, 1, window.context_len, task.horizon, &dev, false);
+            out.extend_from_slice(&q);
+        }
+        let elapsed = t0.elapsed().as_secs_f64();
+        let out_path = out_dir.join(format!("{safe_name}.f32"));
+        let bytes: Vec<u8> = out.iter().flat_map(|v| v.to_le_bytes()).collect();
+        std::fs::write(&out_path, &bytes)?;
+        println!(
+            "{}: {} windows forecast in {:.2}s ({:.1} ms/window) -> {}",
+            task.config,
+            task.windows.len(),
+            elapsed,
+            1000.0 * elapsed / task.windows.len().max(1) as f64,
+            out_path.display()
+        );
+    }
     Ok(())
 }
 
@@ -319,6 +380,8 @@ fn main() -> Result<()> {
     let mut weights_f32: Option<PathBuf> = None;
     let mut cases = 54usize;
     let mut seed = 0u64;
+    let mut manifest_dir = PathBuf::from("fixtures/gifteval");
+    let mut gift_out = PathBuf::from("fixtures/gifteval/forecasts");
     let cmd = args.get(1).cloned().unwrap_or_default();
 
     let mut i = 2;
@@ -384,6 +447,14 @@ fn main() -> Result<()> {
                 seed = args[i + 1].parse()?;
                 i += 2;
             }
+            "--manifest" => {
+                manifest_dir = PathBuf::from(&args[i + 1]);
+                i += 2;
+            }
+            "--out-dir" => {
+                gift_out = PathBuf::from(&args[i + 1]);
+                i += 2;
+            }
             other => return Err(anyhow!("unknown argument: {other}")),
         }
     }
@@ -402,6 +473,7 @@ fn main() -> Result<()> {
             check_backend_flag(&backend)?;
             cmd_bench(&weights, config.as_deref(), n_signals, t_ctx, horizon, reps, chunk)
         }
+        "gifteval" => cmd_gifteval(&manifest_dir, &weights, config.as_deref(), &gift_out),
         "drift" => {
             let weights_f32 = weights_f32.ok_or_else(|| anyhow!("--weights-f32 is required"))?;
             let config = config.ok_or_else(|| anyhow!("--config is required"))?;
@@ -409,7 +481,8 @@ fn main() -> Result<()> {
         }
         _ => Err(anyhow!(
             "usage: t0-cli <forecast --fixture N|parity|bench --signals N [--chunk N]|export-gguf --quant f16|q8_0|q4_0 --out FILE| \
-             drift --weights-f32 PATH --config PATH --quant f16.gguf|q8_0.gguf|q4_0.gguf|int8-theirs [--cases 54] [--seed 0]> \
+             drift --weights-f32 PATH --config PATH --quant f16.gguf|q8_0.gguf|q4_0.gguf|int8-theirs [--cases 54] [--seed 0]| \
+             gifteval --manifest DIR --weights PATH [--out-dir DIR]> \
              [--fixtures DIR] [--weights PATH] [--config PATH] [--backend ndarray|wgpu]"
         )),
     }
