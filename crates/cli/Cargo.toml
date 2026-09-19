@@ -1,0 +1,24 @@
+[package]
+name = "t0-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "t0-cli"
+path = "src/main.rs"
+
+[features]
+default = ["ndarray"]
+ndarray = ["burn-ndarray"]
+wgpu = ["burn-wgpu"]
+
+[dependencies]
+t0-core = { path = "../t0-core" }
+burn = { workspace = true }
+burn-ndarray = { workspace = true, optional = true }
+burn-wgpu = { workspace = true, optional = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+byteorder = { workspace = true }
+anyhow = { workspace = true }
