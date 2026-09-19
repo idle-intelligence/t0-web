@@ -86,7 +86,14 @@ impl Weights {
     /// `t0.*` metadata keys alongside the weights.
     pub fn load_gguf(path: &std::path::Path) -> Result<(Self, T0Config)> {
         let bytes = std::fs::read(path).with_context(|| format!("reading {}", path.display()))?;
-        let file = gguf::read_gguf(&mut bytes.as_slice()).context("parsing gguf")?;
+        Weights::load_gguf_bytes(&bytes)
+    }
+
+    /// Same as `load_gguf` but from an in-memory buffer — the entry point
+    /// for `t0-wasm`, which receives the GGUF as a `Uint8Array` from JS and
+    /// has no filesystem.
+    pub fn load_gguf_bytes(bytes: &[u8]) -> Result<(Self, T0Config)> {
+        let file = gguf::read_gguf(&mut &bytes[..]).context("parsing gguf")?;
 
         let mut tensors = HashMap::with_capacity(file.tensors.len());
         for (name, (shape, ty, data)) in file.tensors {
