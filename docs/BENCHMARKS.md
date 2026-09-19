@@ -137,3 +137,52 @@ Analysis and the upstream cubek-matmul issue note: `docs/runs/2026-09-19-milesto
 Their number is for **t0-beta** (256M params, embed_dim 1024); ours here is **t0-alpha** (102M params, embed_dim 512) — the two checkpoints are not architecture-identical (see `docs/reports/t0-published-numbers.md`), so this is not yet a same-model apples-to-apples row; it is the closest available until t0-beta is ported (GOAL.md's open question on which checkpoint to claim against). `int8-theirs` (their recipe, our checkpoint, our case generator) is our best current apples-to-apples proxy for the *recipe*: worst-case mean drift 0.8494% is above their 0.2271% but with a different model size and a different (undocumented, hence reconstructed) case generator, so this gap should not be read as "our INT8 recipe is worse" — it may equally reflect t0-alpha's smaller embed_dim (512 vs 1024) being more sensitive to per-channel quantization, or a harder case distribution. Q4_0 clearly exceeds their 2%/10% acceptance gates; Q8_0 and int8-theirs are within both gates; f16 is far inside both.
 
 Analysis: `docs/runs/2026-09-19-milestone1a.md`.
+
+## GIFT-Eval subset — reference F32 vs ours F32/f16/Q8_0/Q4_0, t0-alpha
+
+- Machine: Apple M2 (Darwin 25.3.0), `ndarray` (CPU) backend only — `llm-life` (another repo's fine-tune) held the GPU throughout this run, so no wgpu numbers are reported here.
+- Commit: c1d9183 (`cli: add gifteval subcommand...`) + this doc's commit.
+- Reference: `tfc-t0` (PyPI) `T0Forecaster.predict()`, checkpoint `theforecastingcompany/t0-alpha`, scored with the official GIFT-Eval notebook's own metric call (`gluonts.model.evaluate_model` + `MASE()` + `MeanWeightedSumQuantileLoss(quantile_levels=[0.1..0.9])`).
+- Subset: 8 configs / 382 windows (stride-subsampled from 4099; see `docs/runs/2026-09-19-gifteval-subset.md`). **Deviation from the published protocol**: context capped to the trailing 512 observations for BOTH reference and ours (this port has no autoregressive rollout yet — `crates/t0-core/src/model.rs::forecast_series` is one forward pass, `max_horizon=1024`), vs the reference notebook's `CONTEXT_LENGTH=8192`. Numbers below are only comparable to each other, not to the published full-suite row.
+- Commands: `tools/gifteval_subset.py` (export) -> `t0-cli gifteval --backend ndarray --manifest fixtures/gifteval --weights <safetensors|gguf> --out-dir fixtures/gifteval/forecasts_<tag>` (forecast) -> `tools/score_gifteval.py --which <reference|f32|f16|q8_0|q4_0> --forecast-dir <dir>` (score, same gluonts call both sides).
+
+CRPS (`mean_weighted_sum_quantile_loss`):
+
+| task (config/freq/term) | reference F32 | ours F32 | ours f16 | ours Q8_0 | ours Q4_0 |
+|---|---|---|---|---|---|
+| electricity/D/short | 0.0789 | 0.0789 | 0.0789 | 0.0789 | 0.0792 |
+| electricity/W-FRI/short | 0.0529 | 0.0529 | 0.0529 | 0.0529 | 0.0535 |
+| solar/D/short | 0.2711 | 0.2711 | 0.2711 | 0.2711 | 0.2706 |
+| solar/W-FRI/short | 0.1864 | 0.1864 | 0.1864 | 0.1863 | 0.1861 |
+| jena_weather/D/short | 0.0458 | 0.0458 | 0.0458 | 0.0458 | 0.0457 |
+| loop_seattle/D/short | 0.0453 | 0.0453 | 0.0453 | 0.0453 | 0.0454 |
+| saugeenday/D/short | 0.4133 | 0.4133 | 0.4133 | 0.4133 | 0.4169 |
+| us_births/D/short | 0.0231 | 0.0231 | 0.0231 | 0.0231 | 0.0230 |
+| **aggregate (geometric mean)** | **0.0897** | **0.0897** | **0.0897** | **0.0897** | **0.0898** |
+
+MASE:
+
+| task | reference F32 | ours F32 | ours f16 | ours Q8_0 | ours Q4_0 |
+|---|---|---|---|---|---|
+| electricity/D/short | 1.7325 | 1.7325 | 1.7326 | 1.7324 | 1.7274 |
+| electricity/W-FRI/short | 1.4938 | 1.4938 | 1.4939 | 1.4936 | 1.5083 |
+| solar/D/short | 0.9855 | 0.9855 | 0.9855 | 0.9854 | 0.9868 |
+| solar/W-FRI/short | 1.3052 | 1.3052 | 1.3053 | 1.3050 | 1.3013 |
+| jena_weather/D/short | 1.0691 | 1.0691 | 1.0692 | 1.0686 | 1.0770 |
+| loop_seattle/D/short | 0.8970 | 0.8970 | 0.8970 | 0.8971 | 0.8996 |
+| saugeenday/D/short | 3.2756 | 3.2756 | 3.2754 | 3.2755 | 3.3081 |
+| us_births/D/short | 0.4509 | 0.4509 | 0.4509 | 0.4512 | 0.4450 |
+| **aggregate (geometric mean)** | **1.2139** | **1.2139** | **1.2140** | **1.2139** | **1.2157** |
+
+Forecast agreement sanity (ours F32 vs reference, 9-level interpolated quantiles, `us_births/D/short`, 20 windows): max-abs 9.77e-3 (target scale: births counts, O(10^3-10^4) — this is far looser than the Milestone-0 fixture parity of 1.2e-6 max-abs on unit-scale synthetic data; not investigated further this run, flagged for follow-up).
+
+**Published full-suite numbers for context only, NOT a comparison target for this table** (`docs/reports/t0-published-numbers.md`): GIFT-Eval CRPS 0.4941 / MASE 0.7240 (97 configs, `CONTEXT_LENGTH=8192`, no rollout cap, no subsampling). This subset's absolute CRPS/MASE are far from those numbers because it's a different (smaller, energy/traffic-heavy) task mix at 512-step context, not because of any quant or implementation defect — the reference-vs-ours agreement above is the number that matters for "does quantization hurt."
+
+**Verdict per quant** (band: reference F32 ± 0.5%, this doc's assumed noise band per GOAL.md — no repeated-seed reference run was done to measure actual noise, since `T0Forecaster.predict()` is deterministic in eval mode and there's no RNG to reseed):
+- **f16**: within band on every task and the aggregate (largest CRPS delta: 0.0000, largest MASE delta: 0.0003 on jena_weather, ~0.03%). PASS.
+- **Q8_0**: within band on every task and the aggregate (largest MASE delta: 0.0006 on jena_weather, ~0.06%). PASS.
+- **Q4_0**: within band on 6/8 tasks; `electricity/W-FRI` (MASE +0.97%) and `saugeenday` (MASE +0.99%) exceed the 0.5% band, aggregate MASE delta +0.15% (within band). Consistent with the drift benchmark above (Q4_0 point-drift-worst 8.4%, clearly the roughest of the three quants) — CRPS stays within band everywhere (worst delta 0.9% relative on electricity/D, aggregate +0.11%). Borderline PASS on aggregate, marginal FAIL on 2/8 individual tasks.
+
+What was not run: wgpu backend (GPU contended by `llm-life` all session — see machine line above); the officially published 8192-context / no-subsampling / full-97-config protocol (blocked on this port's autoregressive rollout, not yet implemented); single-signal native/browser latency per quant (GOAL.md's next item); the t0.run "Forecast all" timing reference measurement.
+
+Analysis: `docs/runs/2026-09-19-gifteval-subset.md`.

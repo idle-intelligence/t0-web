@@ -79,27 +79,46 @@ def load_manifest():
         return json.load(f)
 
 
+class _SubsampledTestData:
+    """`ds.test_data` restricted to `task["windows"][*]["index"]` — GIFT-Eval
+    subsamples the full test set for runtime (see
+    docs/runs/2026-09-19-gifteval-subset.md's MAX_WINDOWS_PER_TASK note);
+    `evaluate_forecasts` only needs `.input`/`.label` to be iterables of
+    dicts with a numpy `"target"`, so plain lists suffice — no GluonTS
+    dataset wrapping needed."""
+
+    def __init__(self, input_list, label_list):
+        self.input = input_list
+        self.label = label_list
+
+
 def score_task(task, forecasts_9q, seasonality):
-    """forecasts_9q: [n_windows, horizon, 9] numpy array, in QUERY_LEVELS order."""
+    """forecasts_9q: [n_windows, horizon, 9] numpy array, in QUERY_LEVELS order,
+    aligned with `task["windows"]` (already subsampled) order."""
     ds = Dataset(name=task["gift_eval_name"], term="short", to_univariate=False)
     if ds.target_dim != 1:
         ds = Dataset(name=task["gift_eval_name"], term="short", to_univariate=True)
 
-    input_iter = list(ds.test_data.input)
-    assert len(input_iter) == task["n_windows"], (len(input_iter), task["n_windows"])
+    all_inputs = list(ds.test_data.input)
+    all_labels = list(ds.test_data.label)
+    indices = [w["index"] for w in task["windows"]]
+    assert len(indices) == task["n_windows"] == forecasts_9q.shape[0]
 
     forecasts = []
-    for i, entry in enumerate(input_iter):
-        arr = forecasts_9q[i].T  # [9, horizon]
+    for out_i, idx in enumerate(indices):
+        entry = all_inputs[idx]
+        arr = forecasts_9q[out_i].T  # [9, horizon]
         target = np.atleast_1d(np.asarray(entry["target"], dtype=np.float32)).ravel()
         forecasts.append(
             QuantileForecast(
                 forecast_arrays=arr,
                 forecast_keys=[str(q) for q in QUERY_LEVELS],
                 start_date=entry["start"] + len(target),
-                item_id=str(i),
+                item_id=str(idx),
             )
         )
+
+    sub_test_data = _SubsampledTestData([all_inputs[i] for i in indices], [all_labels[i] for i in indices])
 
     class FixedPredictor:
         prediction_length = task["horizon"]
@@ -109,7 +128,7 @@ def score_task(task, forecasts_9q, seasonality):
 
     res = evaluate_model(
         FixedPredictor(),
-        test_data=ds.test_data,
+        test_data=sub_test_data,
         metrics=[MASE(), MeanWeightedSumQuantileLoss(quantile_levels=QUERY_LEVELS)],
         batch_size=1024,
         axis=None,

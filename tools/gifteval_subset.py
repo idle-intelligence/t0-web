@@ -31,6 +31,16 @@ from gluonts.time_feature import get_seasonality
 load_dotenv()
 
 CONTEXT_CAP = 512  # see module docstring
+# Full-test-set window counts for this subset run 20..1850 per task
+# (4099 total). A single non-batched forward pass on the CPU/ndarray
+# backend costs ~0.1-0.3s (see docs/runs/2026-09-19-gifteval-subset.md);
+# 4099 windows x 4 weight variants (F32/f16/Q8_0/Q4_0) would run
+# ~1.5-3.5h. We deterministically stride-subsample each task down to at
+# most MAX_WINDOWS_PER_TASK windows (evenly spaced, not the first N, so
+# short/long-history windows are both represented) to keep the whole
+# subset x quant-ladder sweep under ~15 minutes. Documented deviation,
+# same rationale/place as the context-length cap above.
+MAX_WINDOWS_PER_TASK = 60
 OUT_DIR = os.path.join(os.path.dirname(__file__), "..", "fixtures", "gifteval")
 
 # (dataset/freq, domain) — see docs/runs/2026-09-19-gifteval-subset.md for
@@ -60,8 +70,18 @@ def export_config(name, out_dir):
     ds_key = name.split("/")[0]
     config_name = f"{ds_key.lower()}/{ds.freq}/short"
 
+    all_inputs = list(ds.test_data.input)
+    all_labels = list(ds.test_data.label)
+    n_total = len(all_inputs)
+    if n_total > MAX_WINDOWS_PER_TASK:
+        idx = np.linspace(0, n_total - 1, MAX_WINDOWS_PER_TASK).round().astype(int)
+        idx = sorted(set(idx.tolist()))
+    else:
+        idx = list(range(n_total))
+
     windows = []
-    for i, (inp, label) in enumerate(zip(ds.test_data.input, ds.test_data.label)):
+    for i in idx:
+        inp, label = all_inputs[i], all_labels[i]
         target = np.asarray(inp["target"], dtype=np.float32)
         target = np.atleast_1d(target)
         if target.ndim > 1:
@@ -80,6 +100,7 @@ def export_config(name, out_dir):
         write_f32(os.path.join(out_dir, fut_file), future.tolist())
         windows.append(
             {
+                "index": i,  # position within the FULL (unsampled) ds.test_data
                 "item_id": str(item_id),
                 "context_len": len(ctx),
                 "context_file": ctx_file,
