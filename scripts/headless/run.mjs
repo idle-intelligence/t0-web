@@ -8,10 +8,12 @@
 //      (debounced, commit-on-release -- not one per pointermove).
 //   3. MAE/sMAPE (computed against the real continuation) are finite.
 //   4. moving the origin slider without releasing it ('input' events only)
-//      does not grow the STATUS log line count (repeated forecast/download
-//      lines update in place; only genuine state changes append).
-//   5. the STATUS block (two fixed lines, collapsed log) has constant
-//      height across 20 forecasts at different origins.
+//      does not change the STATUS text (a preview has no committed origin,
+//      so no forecast is scheduled and the status line is left alone).
+//   5. the STATUS text passes through the expected states over the page's
+//      lifetime: a download/loading message, "model loaded (...)", then
+//      "forecasting..." and "forecast from ... in ... ms" once an origin
+//      is committed.
 //
 // Backend is auto-selected by web/worker.js (WebGPU if navigator.gpu
 // exists, else WASM CPU/burn-ndarray) -- this bundled Chromium-for-Testing
@@ -68,6 +70,40 @@ async function waitForForecast(page, origin, timeoutMs = 30000) {
 async function main() {
   const browser = await chromium.launch({ executablePath: EXECUTABLE_PATH });
   const page = await browser.newPage();
+
+  // Record every STATUS text change from the very first paint, so the
+  // "passes through the expected states" gate below can inspect the full
+  // sequence rather than racing a live poll against fast synchronous updates.
+  await page.addInitScript(() => {
+    window.__statusHistory = [];
+    // Several status changes can land in the same synchronous tick (e.g.
+    // 'ready' sets "model loaded..." then immediately triggers the first
+    // forecast, which sets "forecasting..."). A MutationObserver callback
+    // only fires once per microtask with every record from that tick, so
+    // walk oldValue/removed text nodes to recover each intermediate value,
+    // not just the final one.
+    const record = (mutations) => {
+      for (const m of mutations) {
+        if (m.type === 'characterData' && m.oldValue !== null) {
+          window.__statusHistory.push(m.oldValue);
+        } else if (m.type === 'childList') {
+          for (const n of m.removedNodes) {
+            if (n.nodeType === Node.TEXT_NODE) window.__statusHistory.push(n.data);
+          }
+        }
+      }
+      const el = document.getElementById('status-text');
+      if (el) window.__statusHistory.push(el.textContent);
+    };
+    const observer = new MutationObserver(record);
+    const attach = () => {
+      const el = document.getElementById('status-text');
+      if (!el) { requestAnimationFrame(attach); return; }
+      window.__statusHistory.push(el.textContent);
+      observer.observe(el, { childList: true, characterData: true, characterDataOldValue: true, subtree: true });
+    };
+    attach();
+  });
 
   const consoleLines = [];
   page.on('console', (msg) => consoleLines.push(msg.text()));
@@ -153,8 +189,8 @@ async function main() {
       throw new Error(`drag produced ${dragDelta} forecasts, expected exactly 1`);
     }
 
-    // --- slider 'input' (no release) must not grow the log ---
-    const logBefore = await page.evaluate(() => window.__app.logLineCount());
+    // --- slider 'input' (no release) must not change the STATUS text ---
+    const statusBefore = await page.evaluate(() => document.getElementById('status-text').textContent);
     await page.evaluate(() => {
       const slider = document.getElementById('originSlider');
       const base = parseInt(slider.value, 10);
@@ -164,27 +200,26 @@ async function main() {
       }
     });
     await page.waitForTimeout(200);
-    const logAfter = await page.evaluate(() => window.__app.logLineCount());
-    console.log(`slider drag (input only): log lines ${logBefore} -> ${logAfter}`);
-    if (logAfter !== logBefore) {
-      throw new Error(`slider 'input' events grew the log (${logBefore} -> ${logAfter}), expected no change`);
+    const statusAfter = await page.evaluate(() => document.getElementById('status-text').textContent);
+    console.log(`slider drag (input only): status "${statusBefore}" -> "${statusAfter}"`);
+    if (statusAfter !== statusBefore) {
+      throw new Error(`slider 'input' events changed STATUS ("${statusBefore}" -> "${statusAfter}"), expected no change`);
     }
 
-    // --- STATUS block height must stay constant across 20 forecasts ---
-    const heightBefore = await page.evaluate(() => window.__app.statusBlockHeight());
-    const lo = parseInt(await page.evaluate(() => document.getElementById('originSlider').min), 10);
-    const hi = parseInt(await page.evaluate(() => document.getElementById('originSlider').max), 10);
-    const heights = [heightBefore];
-    for (let i = 0; i < 20; i++) {
-      const o = lo + Math.floor(((hi - lo) * i) / 19);
-      await page.evaluate((oo) => window.__app.setOrigin(oo), o);
-      await waitForForecast(page, o);
-      heights.push(await page.evaluate(() => window.__app.statusBlockHeight()));
-    }
-    const minH = Math.min(...heights), maxH = Math.max(...heights);
-    console.log(`status block height over 20 forecasts: ${minH.toFixed(1)}-${maxH.toFixed(1)}px`);
-    if (maxH - minH > 0.5) {
-      throw new Error(`STATUS block height varied (${minH.toFixed(1)}-${maxH.toFixed(1)}px) across 20 forecasts`);
+    // --- STATUS text passes through the expected states ---
+    await page.evaluate((o) => window.__app.setOrigin(o), ORIGINS[0]);
+    await waitForForecast(page, ORIGINS[0]);
+    const statusHistory = await page.evaluate(() => window.__statusHistory);
+    const hasLoading = statusHistory.some((s) => /downloading|loading/i.test(s));
+    const hasModelLoaded = statusHistory.some((s) => /^model loaded \(/.test(s));
+    const hasForecasting = statusHistory.some((s) => s === 'forecasting…');
+    const hasForecastResult = statusHistory.some((s) => /^forecast from .+ in \d+ ms$/.test(s));
+    console.log(`status history (${statusHistory.length} entries): ${JSON.stringify(statusHistory.slice(0, 8))}...`);
+    console.log(
+      `status states: loading=${hasLoading}, model loaded=${hasModelLoaded}, forecasting=${hasForecasting}, forecast result=${hasForecastResult}`
+    );
+    if (!hasLoading || !hasModelLoaded || !hasForecasting || !hasForecastResult) {
+      throw new Error(`STATUS text did not pass through the expected states: ${JSON.stringify(statusHistory)}`);
     }
 
     report.pass = true;

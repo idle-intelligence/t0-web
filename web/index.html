@@ -83,7 +83,7 @@
             gap: 8px;
             font-size: 14px;
         }
-        #statusLine1 {
+        #status-text {
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
@@ -106,38 +106,6 @@
             0%, 100% { opacity: 1; }
             50% { opacity: 0.4; }
         }
-        #statusLine2 {
-            font-family: 'IBM Plex Mono', monospace;
-            font-size: 12px;
-            color: var(--faint);
-            margin-top: 4px;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-        #logToggle {
-            display: inline-block;
-            margin-top: 6px;
-            font-family: 'IBM Plex Mono', monospace;
-            font-size: 11px;
-            color: var(--faint);
-            background: none;
-            border: none;
-            padding: 0;
-            cursor: pointer;
-            text-decoration: underline;
-        }
-        #logToggle:hover { color: var(--muted); }
-        #statusLog {
-            font-family: 'IBM Plex Mono', monospace;
-            font-size: 12px;
-            color: var(--faint);
-            margin-top: 6px;
-            white-space: pre-wrap;
-            word-break: break-word;
-        }
-        #statusLog[hidden] { display: none; }
-
         .controls {
             display: flex;
             align-items: center;
@@ -258,15 +226,10 @@
 
     <section>
         <h2>STATUS</h2>
-        <div id="statusFixed">
-            <div class="status">
-                <span class="status-dot" id="statusDot"></span>
-                <span id="statusLine1">Initializing...</span>
-            </div>
-            <div id="statusLine2"></div>
+        <div class="status">
+            <span class="status-dot" id="statusDot"></span>
+            <span id="status-text">Initializing...</span>
         </div>
-        <button id="logToggle" type="button">show log</button>
-        <pre id="statusLog" hidden></pre>
     </section>
 
     <section>
@@ -326,10 +289,7 @@
 
     <script type="module">
         const statusDot = document.getElementById('statusDot');
-        const statusLine1 = document.getElementById('statusLine1');
-        const statusLine2 = document.getElementById('statusLine2');
-        const statusLog = document.getElementById('statusLog');
-        const logToggle = document.getElementById('logToggle');
+        const statusTextEl = document.getElementById('status-text');
         const originSlider = document.getElementById('originSlider');
         const originLabel = document.getElementById('originLabel');
         const chartCanvas = document.getElementById('chart');
@@ -346,50 +306,19 @@
 
         const WINDOW_CONTEXT = 160; // chart displays this many context points before the origin
 
-        // STATUS is exactly two fixed-height lines: line 1 is the current
-        // state (loading phase, then "model loaded (...), backend X,
-        // origin Y" once ready, re-rendered whenever the origin changes),
-        // line 2 is the last event with its time, replaced on each event.
-        // The full history is a plain <pre>, collapsed by default behind a
-        // "show log"/"hide log" toggle, no inner scrollbar -- keyed entries
-        // (forecast timing, download %, ...) still update in place there.
-        let modelInfo = null; // { sizeStr, backend } -- set once, at 'ready'
+        // STATUS is a single line, replaced as state changes: downloading %
+        // -> "model loaded (...), backend" -> "forecasting..." -> "forecast
+        // from <date> in <ms> ms". Boot/progress events also go to console.log.
         function setDot(state) {
             statusDot.className = 'status-dot ' + state;
         }
-        function setLine1(text) {
-            statusLine1.textContent = text;
+        function setStatus(text) {
+            statusTextEl.textContent = text;
+            console.log(`[t0] ${text}`);
         }
-        function renderStateLine() {
-            if (!modelInfo) return;
-            setLine1(`model loaded (Q8_0, ${modelInfo.sizeStr}), backend ${modelInfo.backend}, origin ${originDateStr(origin)}`);
+        function formatBackend(b) {
+            return b === 'webgpu' ? 'WebGPU' : b;
         }
-
-        const logEntries = []; // { key, text } -- text already timestamped, capped at 200
-        function logLine(text, key) {
-            const stamp = `${new Date().toISOString().slice(11, 19)} ${text}`;
-            statusLine2.textContent = stamp;
-            if (key) {
-                const existing = logEntries.find((e) => e.key === key);
-                if (existing) {
-                    existing.text = stamp;
-                    renderLog();
-                    return;
-                }
-            }
-            logEntries.push({ key, text: stamp });
-            if (logEntries.length > 200) logEntries.shift();
-            renderLog();
-        }
-        function renderLog() {
-            statusLog.textContent = logEntries.map((e) => e.text).join('\n');
-        }
-
-        logToggle.addEventListener('click', () => {
-            const wasHidden = statusLog.hidden;
-            statusLog.hidden = !wasHidden;
-            logToggle.textContent = wasHidden ? 'hide log' : 'show log';
-        });
 
         function formatBytes(bytes) {
             const mb = bytes / (1024 * 1024);
@@ -434,12 +363,6 @@
             forecastCount: 0, // incremented once per *accepted* (non-stale) forecast response -- test hook
             setOrigin(i) {
                 commitOrigin(i);
-            },
-            logLineCount() {
-                return logEntries.length;
-            },
-            statusBlockHeight() {
-                return document.getElementById('statusFixed').getBoundingClientRect().height;
             },
         };
 
@@ -650,7 +573,7 @@
             lastForecast = null;
             originSlider.value = origin;
             originLabel.textContent = originDateStr(origin);
-            renderStateLine();
+            if (window.__app.ready) setStatus('forecasting…');
             drawAll();
             updateMetrics();
             scheduleForecast(origin);
@@ -705,8 +628,7 @@
             switch (msg.type) {
                 case 'status':
                     setDot('loading');
-                    if (!modelInfo) setLine1(msg.text);
-                    logLine(msg.text, msg.key);
+                    setStatus(msg.text);
                     break;
                 case 'ready': {
                     series = msg.series;
@@ -718,10 +640,10 @@
                     metricsCard.style.display = 'block';
                     metricSize.textContent = formatBytes(msg.modelBytes);
                     metricBackend.textContent = msg.backend;
-                    modelInfo = { sizeStr: formatBytes(msg.modelBytes), backend: msg.backend };
                     setDot('ready');
+                    setStatus(`model loaded (${formatBytes(msg.modelBytes)}), ${formatBackend(msg.backend)}`);
                     window.__app.ready = true;
-                    commitOrigin(origin); // also calls renderStateLine()
+                    commitOrigin(origin);
                     break;
                 }
                 case 'forecast': {
@@ -729,7 +651,7 @@
                     lastForecast = msg;
                     window.__app.lastForecast = msg;
                     window.__app.forecastCount += 1;
-                    logLine(`forecast ${msg.ms.toFixed(0)} ms`, 'forecast');
+                    setStatus(`forecast from ${msg.originDate} in ${msg.ms.toFixed(0)} ms`);
                     if (msg.origin === origin) {
                         drawAll();
                         updateMetrics();
@@ -738,8 +660,7 @@
                 }
                 case 'error':
                     setDot('error');
-                    setLine1('Error: ' + msg.message);
-                    logLine('ERROR: ' + msg.message);
+                    setStatus('Error: ' + msg.message);
                     console.error(msg.message);
                     break;
                 default:
@@ -748,7 +669,7 @@
         };
 
         setDot('loading');
-        setLine1('Loading...');
+        setStatus('Loading...');
         worker.postMessage({ type: 'load' });
     </script>
 </body>
