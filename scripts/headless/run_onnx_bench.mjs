@@ -1,11 +1,13 @@
 // Headless runner for bench/onnx/index.html: drives the official
 // t0-alpha-onnx-int8 export through onnxruntime-web in Playwright's bundled
-// Chromium (never the maintainer's browser). Reports cold/warm/batch timing and
+// Chromium (never a personal browser). Reports cold/warm/batch timing and
 // the raw first-forecast output (for the F32-reference verification diff,
 // computed by scripts/headless/compare_onnx_ref.mjs).
 //
 // Usage: node scripts/headless/run_onnx_bench.mjs [--url http://127.0.0.1:PORT/]
 import { chromium } from 'playwright';
+import os from 'node:os';
+import path from 'node:path';
 
 function parseArgs(argv) {
   const out = {};
@@ -23,7 +25,8 @@ function parseArgs(argv) {
 const args = parseArgs(process.argv.slice(2));
 const url = args.url || 'http://127.0.0.1:8032/';
 const EXECUTABLE_PATH =
-  '~/Library/Caches/ms-playwright/chromium-1243/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
+  process.env.CHROMIUM_PATH ||
+  path.join(os.homedir(), 'Library/Caches/ms-playwright', 'chromium-1243/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing');
 
 const browser = await chromium.launch({ executablePath: EXECUTABLE_PATH });
 const page = await browser.newPage();

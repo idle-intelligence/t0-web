@@ -1,6 +1,6 @@
 # t0-web
 
-Port of The Forecasting Company's [t0-alpha](https://huggingface.co/theforecastingcompany/t0-alpha) time-series forecaster to Burn/wgpu, native and WASM+WebGPU. See `GOAL.md` for the project plan, `CLAUDE.md` for working rules, `docs/reports/t0-alpha.md` for the architecture research.
+Port of The Forecasting Company's [t0-alpha](https://huggingface.co/theforecastingcompany/t0-alpha) time-series forecaster to Burn/wgpu, native and WASM+WebGPU. See `CLAUDE.md` for working rules, `docs/reports/t0-alpha.md` for the architecture research.
 
 ## Status: Milestone 0 (native numerical parity, F32)
 
@@ -98,6 +98,6 @@ t0-cli bench --weights t0-alpha-q4_0.gguf --backend ndarray --signals 1000 --con
 - `FUTURE` covariate rows in the scaler, autoregressive rollout past 1024 steps, quantile interpolation/extrapolation for non-trained levels — see `docs/runs/2026-09-19-parity.md`'s last section.
 - WGSL dequant/matmul kernels (Milestone 1a keeps quantization a load-time CPU-side dequant into f32 tensors; a real WASM+WebGPU deployment needs the on-GPU Q8/Q4 kernels described in `docs/reports/t0-alpha.md` §5 — deferred to the WASM/browser milestone).
 - The WASM build itself (only `cargo build -p t0-core --target wasm32-unknown-unknown` is checked to compile; no browser page, no `web/` glue).
-- The GIFT-Eval subset harness (accuracy verdict for Q8_0/Q4_0, per GOAL.md's "beat their numbers").
-- The t0.run-style page and the METAR live metric (data layer, per GOAL.md item 3-4).
+- The GIFT-Eval subset harness (accuracy verdict for Q8_0/Q4_0).
+- The t0.run-style page and the METAR live metric (data layer).
 - Reused nothing verbatim from `llm-web`: its `crates/llm-wasm/src/model.rs` is hardcoded to the `Wgpu` backend and the Qwen2 rotate-half RoPE convention (different from t0-alpha's interleaved-pair xpos RoPE), so a fresh backend-generic implementation was more direct than adapting it. The `getrandom/wasm_js` + `.cargo/config.toml` cfg-flag fix for the wasm32 build *was* copied from `llm-wasm/Cargo.toml`'s `web` feature.

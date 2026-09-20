@@ -7,6 +7,8 @@
 //
 // Usage: node scripts/headless/run_compare_bench.mjs [--url http://127.0.0.1:8046/bench/compare/] [--context 512] [--horizon 32] [--quant q8_0] [--screenshot /path/to.png]
 import { chromium } from 'playwright';
+import os from 'node:os';
+import path from 'node:path';
 
 function parseArgs(argv) {
   const out = {};
@@ -28,7 +30,8 @@ const horizon = args.horizon ? parseInt(args.horizon, 10) : 32;
 const quant = args.quant || 'q8_0';
 const screenshot = args.screenshot || null;
 const EXECUTABLE_PATH =
-  '~/Library/Caches/ms-playwright/chromium-1243/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
+  process.env.CHROMIUM_PATH ||
+  path.join(os.homedir(), 'Library/Caches/ms-playwright', 'chromium-1243/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing');
 
 const browser = await chromium.launch({ executablePath: EXECUTABLE_PATH });
 const page = await browser.newPage();

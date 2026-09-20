@@ -11,7 +11,7 @@
   `bench/onnx/`, `bench/ours/`).
 - Browser: Playwright's bundled Chromium-for-Testing, `chromium-1243`
   (`Google Chrome for Testing 153.0.8010.12`), launched with an explicit
-  `executablePath`, never the maintainer's browser.
+  `executablePath`, never a personal browser.
 - `onnxruntime-web`: `1.29.0` (pinned to match the artifact's own validation
   card, `manifest.json`'s `runtime.onnxruntime_web`), installed via
   `npm install --save-dev onnxruntime-web@1.29.0` — a local copy is served

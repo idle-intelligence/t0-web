@@ -23,7 +23,7 @@ same as `bench/onnx`/`bench/ours`), context/horizon 512/32, ours at Q8_0.
   `crates/t0-wasm`, `crates/t0-core`, `scripts/headless/run_compare_bench.mjs`
   (see git log around this doc's commit).
 - Browser: Playwright's bundled Chromium-for-Testing (`chromium-1243`),
-  explicit `executablePath`, never the maintainer's browser.
+  explicit `executablePath`, never a personal browser.
 - Served from the repo root: `python3 -m http.server 8046 --bind 127.0.0.1`,
   page at `http://127.0.0.1:8046/bench/compare/`.
 - Command: `node scripts/headless/run_compare_bench.mjs --url http://127.0.0.1:8046/bench/compare/ --context 512 --horizon 32 --quant q8_0`

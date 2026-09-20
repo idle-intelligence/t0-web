@@ -5,6 +5,8 @@
 //
 // Usage: node scripts/headless/run_ours_bench.mjs --url http://127.0.0.1:PORT/ --pkg ./pkg-wgpu --gguf ./t0-alpha-q8_0.gguf --label "Q8_0 WebGPU"
 import { chromium } from 'playwright';
+import os from 'node:os';
+import path from 'node:path';
 
 function parseArgs(argv) {
   const out = {};
@@ -26,7 +28,8 @@ const gguf = args.gguf || './t0-alpha-q8_0.gguf';
 const label = args.label || `${pkg}/${gguf}`;
 const chunk = args.chunk ? parseInt(args.chunk, 10) : 16;
 const EXECUTABLE_PATH =
-  '~/Library/Caches/ms-playwright/chromium-1243/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
+  process.env.CHROMIUM_PATH ||
+  path.join(os.homedir(), 'Library/Caches/ms-playwright', 'chromium-1243/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing');
 
 const browser = await chromium.launch({ executablePath: EXECUTABLE_PATH });
 const page = await browser.newPage();

@@ -13,10 +13,10 @@ subsampling. Only the weights/variant plumbing differs (t0-beta dir,
 `dequant_gguf.read_gguf` is imported read-only from the fullsuite worktree
 (generic, no alpha-specific hardcoding) rather than duplicated.
 
-venv: ~/Code/idle-intelligence/t0-web/.venv (reused read-only, same
+venv: this repo's .venv (reused read-only, same
 as run_gifteval.py). Launch:
 
-    ~/Code/idle-intelligence/t0-web/.venv/bin/python3 \\
+    .venv/bin/python3 \\
         tools/fullsuite_gifteval_beta.py --variant f32 --max-minutes 20
 """
 
@@ -30,13 +30,19 @@ import time
 import torch
 from dotenv import load_dotenv
 
-FULLSUITE_TOOLS = "~/Code/idle-intelligence/t0-web/.claude/worktrees/fullsuite/tools/fullsuite"
+FULLSUITE_TOOLS = os.environ.get(
+    "FULLSUITE_TOOLS_DIR",
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools", "fullsuite"),
+)
 sys.path.insert(0, FULLSUITE_TOOLS)
 
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-T0_BETA_DIR = "~/Code/idle-intelligence/models/hf/theforecastingcompany/t0-beta"
+T0_BETA_DIR = os.environ.get(
+    "T0_BETA_DIR",
+    os.path.expanduser("~/Code/idle-intelligence/models/hf/theforecastingcompany/t0-beta"),
+)
 GGUF_DIR = os.path.join(ROOT, "fixtures", "beta", "gguf")
 
 CONTEXT_LENGTH = 8192  # same as run_gifteval.py, their notebook's own value

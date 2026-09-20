@@ -1,5 +1,5 @@
 // Headless smoke test for web/index.html: loads the page in Playwright's
-// bundled Chromium (never the maintainer's real browser -- CLAUDE.md).
+// bundled Chromium (never a personal browser -- CLAUDE.md).
 //
 // The plotted history (US births, July-November 1988) never changes; only
 // the origin (where the forecast starts) is draggable within it, drawn on
@@ -25,6 +25,7 @@
 // Usage: node scripts/headless/run.mjs [--url http://127.0.0.1:PORT/]
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import os from 'node:os';
 
 function parseArgs(argv) {
   const out = {};
@@ -52,7 +53,8 @@ const { chromium } = await import('playwright');
 // passed explicitly so this doesn't depend on playwright's own browser
 // revision bookkeeping matching whatever happens to be cached.
 const EXECUTABLE_PATH =
-  '~/Library/Caches/ms-playwright/chromium-1229/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
+  process.env.CHROMIUM_PATH ||
+  path.join(os.homedir(), 'Library/Caches/ms-playwright/chromium-1229/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing');
 
 async function main() {
   const browser = await chromium.launch({ executablePath: EXECUTABLE_PATH });
