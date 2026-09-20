@@ -24,6 +24,7 @@ const url = args.url || 'http://127.0.0.1:8033/';
 const pkg = args.pkg || './pkg-wgpu';
 const gguf = args.gguf || './t0-alpha-q8_0.gguf';
 const label = args.label || `${pkg}/${gguf}`;
+const chunk = args.chunk ? parseInt(args.chunk, 10) : 16;
 const EXECUTABLE_PATH =
   '~/Library/Caches/ms-playwright/chromium-1243/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
 
@@ -34,7 +35,7 @@ page.on('pageerror', (err) => console.error('[pageerror]', err.message));
 
 console.log('Loading', url, 'label:', label);
 await page.goto(url, { waitUntil: 'load' });
-const results = await page.evaluate(([pkg, gguf, label]) => window.__bench.benchOne(pkg, gguf, label), [pkg, gguf, label]);
+const results = await page.evaluate(([pkg, gguf, label, chunk]) => window.__bench.benchOne(pkg, gguf, label, chunk), [pkg, gguf, label, chunk]);
 console.log(JSON.stringify(results, null, 2));
 
 await browser.close();

@@ -26,7 +26,7 @@ async function loadSeries() {
   return new Float32Array(buf);
 }
 
-async function benchOne(pkgDir, ggufUrl, backendLabel) {
+async function benchOne(pkgDir, ggufUrl, backendLabel, chunk = CHUNK) {
   const t0wasm = await import(`${pkgDir}/t0_wasm.js`);
   await t0wasm.default();
   await t0wasm.initBackend();
@@ -56,13 +56,16 @@ async function benchOne(pkgDir, ggufUrl, backendLabel) {
   }
   const warmMedian = median(times);
 
-  // 24-signal batch, chunked by 16
+  // 24-signal batch, chunked by `chunk` (16 == t0_core::DEFAULT_BATCH_CHUNK,
+  // the Burn/cubecl shared-memory-autotune cap; t0-fast has no such cap, so
+  // its bench run passes chunk=24, i.e. one forward pass for the whole
+  // batch -- see docs/runs/2026-09-20-perf.md's "one launch" item)
   let batch;
   try {
     const t0 = performance.now();
-    await model.forecastBatch(context, N_BATCH, HORIZON, CHUNK);
+    await model.forecastBatch(context, N_BATCH, HORIZON, chunk);
     const ms = performance.now() - t0;
-    batch = { n: N_BATCH, chunk: CHUNK, ms, msPerSignal: ms / N_BATCH };
+    batch = { n: N_BATCH, chunk, ms, msPerSignal: ms / N_BATCH };
   } catch (e) {
     batch = { error: e.message || String(e) };
   }
