@@ -194,7 +194,7 @@ async function handleLoad(modelKey) {
         self.postMessage({ type: 'status', text: `Loading WASM module (${BACKEND})...` });
         const wasmJsUrl = new URL(`${PKG_DIR}/t0_wasm.js?v=${ENGINE_BUILD}`, import.meta.url).href;
         t0wasm = await import(wasmJsUrl);
-        await t0wasm.default(new URL(`${PKG_DIR}/t0_wasm_bg.wasm?v=${ENGINE_BUILD}`, import.meta.url).href);
+        await t0wasm.default({ module_or_path: new URL(`${PKG_DIR}/t0_wasm_bg.wasm?v=${ENGINE_BUILD}`, import.meta.url).href });
         // Must run before T0Wasm.load(): on wgpu this drives the async
         // requestAdapter()/requestDevice() setup that WASM has no blocking
         // executor for (see t0-wasm's initBackend doc comment); a no-op on

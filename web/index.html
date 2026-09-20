@@ -619,7 +619,7 @@
         function chartDomain() {
             if (cachedDomain) return cachedDomain;
             const start = INPUT_WINDOW.start;
-            const end = Math.min(series.length - 1, INPUT_WINDOW.end + HORIZON);
+            const end = Math.min(series.length - 1, INPUT_WINDOW.end + 32);
             let lo = Infinity, hi = -Infinity;
             for (let i = start; i <= end; i++) { lo = Math.min(lo, series[i]); hi = Math.max(hi, series[i]); }
             const pad = (hi - lo) * 0.1 || 1;
