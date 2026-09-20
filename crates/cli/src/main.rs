@@ -28,6 +28,9 @@ fn device() -> <Backend as burn::tensor::backend::Backend>::Device {
 }
 
 fn check_backend_flag(requested: &str) -> Result<()> {
+    if requested == "fast" {
+        return Err(anyhow!("--backend fast is not a Burn backend; this codepath should have dispatched to the t0-fast commands directly"));
+    }
     if requested != BACKEND_NAME {
         return Err(anyhow!(
             "--backend {requested} requested but this binary was built with --features {BACKEND_NAME} \
@@ -365,6 +368,64 @@ fn cmd_drift(weights_f32_path: &Path, config_path: &Path, quant: &str, n_cases: 
     Ok(())
 }
 
+/// `t0-fast` (no Burn at inference) parity check: same fixtures, same
+/// 1e-4 max-abs gate as `cmd_parity`, but only the final quantile output
+/// is compared -- `t0-fast::model::forward_async` has no `Trace` hook.
+#[cfg(feature = "fast")]
+fn cmd_parity_fast(fixtures_dir: &Path, weights_path: &Path, config_path: Option<&Path>) -> Result<()> {
+    let manifest: Manifest = serde_json::from_str(&std::fs::read_to_string(fixtures_dir.join("manifest.json"))?)?;
+    let (weights, config) = Weights::load_auto(weights_path, config_path)?;
+    let engine = t0_fast::Engine::new()?;
+    let model = t0_fast::load_model(&engine, &weights, config)?;
+    println!("{:<28} {:>14}", "case", "quant_max_abs");
+    let mut worst = 0.0f32;
+    for case in &manifest.cases {
+        let context = read_f32(&fixtures_dir.join(&case.context_file))?;
+        let expected_q = read_f32(&fixtures_dir.join(&case.quantiles_file))?;
+        let got_q = t0_fast::forecast(&engine, &model, &context, case.v, manifest.context_len, manifest.horizon)?;
+        let (q_abs, _) = max_abs_err(&got_q, &expected_q);
+        println!("{:<28} {:>14.6e}", case.name, q_abs);
+        worst = worst.max(q_abs);
+    }
+    println!("worst quantile max-abs error across fixtures: {worst:.6e}");
+    if worst > 1e-4 {
+        return Err(anyhow!("parity gate failed: max-abs error {worst:.6e} exceeds 1e-4"));
+    }
+    println!("parity gate PASSED (<= 1e-4 max-abs)");
+    Ok(())
+}
+
+#[cfg(feature = "fast")]
+#[allow(clippy::too_many_arguments)]
+fn cmd_bench_fast(weights_path: &Path, config_path: Option<&Path>, n_signals: usize, t_ctx: usize, horizon: usize, reps: usize, warmup: usize) -> Result<()> {
+    let file_size = std::fs::metadata(weights_path)?.len();
+    let t0 = Instant::now();
+    let (weights, config) = Weights::load_auto(weights_path, config_path)?;
+    let engine = t0_fast::Engine::new()?;
+    let model = t0_fast::load_model(&engine, &weights, config)?;
+    let load_time = t0.elapsed();
+    let context = synthetic_sines(n_signals, t_ctx);
+
+    for _ in 0..warmup {
+        let _ = t0_fast::forecast(&engine, &model, &context, n_signals, t_ctx, horizon)?;
+    }
+    let mut times = Vec::with_capacity(reps);
+    for _ in 0..reps {
+        let t0 = Instant::now();
+        let _ = t0_fast::forecast(&engine, &model, &context, n_signals, t_ctx, horizon)?;
+        times.push(t0.elapsed().as_secs_f64());
+    }
+    let med = median(times.clone());
+    println!(
+        "backend=fast weights={} file_bytes={file_size} load_s={:.3} n_signals={n_signals} t_ctx={t_ctx} horizon={horizon} \
+         reps={reps} median_s={med:.4} per_signal_ms={:.4} all_s={times:?}",
+        weights_path.display(),
+        load_time.as_secs_f64(),
+        (med * 1000.0) / n_signals as f64,
+    );
+    Ok(())
+}
+
 fn median(mut xs: Vec<f64>) -> f64 {
     xs.sort_by(|a, b| a.partial_cmp(b).unwrap());
     xs[xs.len() / 2]
@@ -516,11 +577,19 @@ fn main() -> Result<()> {
             cmd_forecast(&fixtures, &weights, config.as_deref(), fixture_idx)
         }
         "parity" => {
+            #[cfg(feature = "fast")]
+            if backend == "fast" {
+                return cmd_parity_fast(&fixtures, &weights, config.as_deref());
+            }
             check_backend_flag(&backend)?;
             cmd_parity(&fixtures, &weights, config.as_deref())
         }
         "export-gguf" => cmd_export_gguf(&weights, config.as_deref().ok_or_else(|| anyhow!("--config is required"))?, &quant, &out),
         "bench" => {
+            #[cfg(feature = "fast")]
+            if backend == "fast" {
+                return cmd_bench_fast(&weights, config.as_deref(), n_signals, t_ctx, horizon, reps, warmup);
+            }
             check_backend_flag(&backend)?;
             cmd_bench(&weights, config.as_deref(), n_signals, t_ctx, horizon, reps, chunk, warmup)
         }
