@@ -863,9 +863,14 @@
                         ? msg.quantileLevels
                         : Array.from({ length: msg.nQuantiles }, (_, i) => (i + 1) / (msg.nQuantiles + 1));
                     seriesStartDate = msg.startDate;
-                    INPUT_WINDOW = { start: dateToIndex('1988-07-01'), end: dateToIndex('1988-11-30') };
-                    ORIGIN = clampOrigin(dateToIndex('1988-11-30'));
-                    markerOrigin = ORIGIN;
+                    // Only set up the window/origin on the first load -- a
+                    // model switch keeps the series and wherever the user
+                    // dragged the origin to, and just re-forecasts there.
+                    if (!INPUT_WINDOW) {
+                        INPUT_WINDOW = { start: dateToIndex('1988-07-01'), end: dateToIndex('1988-11-30') };
+                        ORIGIN = clampOrigin(dateToIndex('1988-11-30'));
+                        markerOrigin = ORIGIN;
+                    }
                     metricsCard.style.display = 'block';
                     metricSize.textContent = formatBytes(msg.modelBytes);
                     metricBackend.textContent = msg.backend;
