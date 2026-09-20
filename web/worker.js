@@ -72,6 +72,7 @@ let t0wasm = null;
 let model = null;
 let series = null;
 let seriesMeta = null;
+let forecastInFlight = null; // Promise<Float32Array> of model.forecast() while it's pending
 
 // freq is always 'D' for this bundled series (us_births) -- date-per-index
 // is start_date + index days, no calendar-skip frequencies supported here.
@@ -151,6 +152,14 @@ async function handleLoad(modelKey) {
     const key = MODELS[modelKey] ? modelKey : DEFAULT_MODEL_KEY;
     const m = MODELS[key];
 
+    // A forecast may still be in flight (async GPU readback on wgpu) when a
+    // model switch arrives -- wait for it before freeing the model out from
+    // under it, or wasm-bindgen panics ("attempted to take ownership of
+    // Rust value while it was borrowed").
+    if (forecastInFlight) {
+        await forecastInFlight.catch(() => {});
+    }
+
     if (model) {
         model.free();
         model = null;
@@ -223,7 +232,16 @@ async function handleForecast(origin, requestId) {
     // model.forecast is always async now (t0-wasm's wgpu build needs a real
     // async GPU readback; the ndarray build resolves the same Promise
     // immediately) -- always `await`, never assume a sync return value.
-    const quantiles = await model.forecast(context, HORIZON);
+    // Tracked in forecastInFlight so a concurrent model switch waits for it
+    // instead of freeing the model out from under this call.
+    const p = model.forecast(context, HORIZON);
+    forecastInFlight = p;
+    let quantiles;
+    try {
+        quantiles = await p;
+    } finally {
+        if (forecastInFlight === p) forecastInFlight = null;
+    }
     const ms = performance.now() - t0;
     self.postMessage({
         type: 'forecast',
