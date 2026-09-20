@@ -367,7 +367,21 @@
 
         const PAD_L = 44, PAD_R = 8, PAD_T = 10, PAD_B = 20;
         const MIN_PRECEDING_DAYS = 60; // at least this many drawn days before the origin
-        const QLEVELS = [0.1, 0.25, 0.5, 0.75, 0.9]; // t0-alpha/t0-beta's trained quantile levels
+        // The active model's trained quantile levels (alpha: 5, beta: 21),
+        // sent by the worker in the 'ready' message's quantileLevels.
+        let quantileLevels = [0.1, 0.25, 0.5, 0.75, 0.9];
+
+        // Index into quantiles/quantileLevels closest to a target level --
+        // lets the band always draw the closest available Q10/Q25/Q75/Q90
+        // regardless of how many levels the active model has.
+        function qIndexNear(target) {
+            let bestI = 0, bestD = Infinity;
+            quantileLevels.forEach((lvl, i) => {
+                const d = Math.abs(lvl - target);
+                if (d < bestD) { bestD = d; bestI = i; }
+            });
+            return bestI;
+        }
 
         // STATUS is a single line, replaced as state changes: "downloading
         // model: N%" -> "model loaded, <backend>" -> "forecast in <ms> ms".
@@ -613,21 +627,24 @@
                 }
             }
 
-            // Q10-Q90 (outer, light gray)
+            // Q10-Q90 (outer, light gray) -- nearest available levels to
+            // 0.1/0.9 (alpha has them exactly; beta's finer grid does too).
+            const q10i = qIndexNear(0.1), q90i = qIndexNear(0.9);
+            const q25i = qIndexNear(0.25), q75i = qIndexNear(0.75);
             outputCtx.fillStyle = 'rgba(0, 0, 0, 0.09)';
             outputCtx.beginPath();
-            for (let t = 0; t < hZ; t++) outputCtx.lineTo(xAt(t), yAt(q(t, 0)));
-            for (let t = hZ - 1; t >= 0; t--) outputCtx.lineTo(xAt(t), yAt(q(t, nq - 1)));
+            for (let t = 0; t < hZ; t++) outputCtx.lineTo(xAt(t), yAt(q(t, q10i)));
+            for (let t = hZ - 1; t >= 0; t--) outputCtx.lineTo(xAt(t), yAt(q(t, q90i)));
             outputCtx.closePath();
             outputCtx.fill();
 
             // Q25-Q75 (inner) -- overlaps the outer fill, reading visibly
             // darker in the middle without needing a higher raw alpha.
-            if (nq >= 5) {
+            if (q25i !== q10i && q75i !== q90i) {
                 outputCtx.fillStyle = 'rgba(0, 0, 0, 0.09)';
                 outputCtx.beginPath();
-                for (let t = 0; t < hZ; t++) outputCtx.lineTo(xAt(t), yAt(q(t, 1)));
-                for (let t = hZ - 1; t >= 0; t--) outputCtx.lineTo(xAt(t), yAt(q(t, nq - 2)));
+                for (let t = 0; t < hZ; t++) outputCtx.lineTo(xAt(t), yAt(q(t, q25i)));
+                for (let t = hZ - 1; t >= 0; t--) outputCtx.lineTo(xAt(t), yAt(q(t, q75i)));
                 outputCtx.closePath();
                 outputCtx.fill();
             }
@@ -684,16 +701,17 @@
             }
             const { quantiles, horizon: hZ, nQuantiles: nq, ms } = lastForecast;
             const mid = Math.floor(nq / 2);
+            const q10i = qIndexNear(0.1), q90i = qIndexNear(0.9);
             let inside = 0, pinballSum = 0, pinballCount = 0;
             let saeMedian = 0, saeNaive = 0, n = 0;
             for (let t = 0; t < hZ; t++) {
                 if (ORIGIN + t >= series.length) continue;
                 const actual = series[ORIGIN + t];
-                const q0 = quantiles[t * nq + 0], qLast = quantiles[t * nq + nq - 1];
+                const q0 = quantiles[t * nq + q10i], qLast = quantiles[t * nq + q90i];
                 if (actual >= q0 && actual <= qLast) inside += 1;
                 for (let qi = 0; qi < nq; qi++) {
                     const pred = quantiles[t * nq + qi];
-                    const lvl = QLEVELS[qi] ?? qi / (nq - 1);
+                    const lvl = quantileLevels[qi] ?? qi / (nq - 1);
                     const err = actual - pred;
                     pinballSum += err >= 0 ? err * lvl : -err * (1 - lvl);
                     pinballCount += 1;
@@ -841,6 +859,9 @@
                     series = msg.series;
                     horizon = msg.horizon;
                     nQuantiles = msg.nQuantiles;
+                    quantileLevels = (msg.quantileLevels && msg.quantileLevels.length === msg.nQuantiles)
+                        ? msg.quantileLevels
+                        : Array.from({ length: msg.nQuantiles }, (_, i) => (i + 1) / (msg.nQuantiles + 1));
                     seriesStartDate = msg.startDate;
                     INPUT_WINDOW = { start: dateToIndex('1988-07-01'), end: dateToIndex('1988-11-30') };
                     ORIGIN = clampOrigin(dateToIndex('1988-11-30'));
