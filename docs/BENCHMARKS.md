@@ -336,3 +336,106 @@ Footnote — this repo's own 512-context-capped GIFT-Eval subset (not the offici
 **Quotable paragraph.** On the same M2, same headless Chromium build, same `us_births` window (context 512, horizon 32): their official `t0-alpha-onnx-int8` export runs on onnxruntime-web's WebGPU EP at 64.0ms warm, 8.87ms/signal batched. Fused-Burn (`burn-wgpu` `fusion`) is still slower on both axes (169.3-169.8ms warm, 34.0-34.2ms/signal batch). `t0-fast` — a second engine with no Burn at inference, raw `wgpu`/WGSL kernels, GGUF block bytes kept resident (no F32 expansion), one command encoder per forecast — changes the picture: its Q8_0-resident build is **34.5ms warm, nearly 2x faster than their ONNX export**, and Q4_0-resident is **29.8ms, over 2x faster**; both are the first rows in this repo's history to beat the ORT baseline on single-call latency. Batch-24 dropped from an 18.1/15.3ms/signal historical baseline to **11.2/11.2ms/signal** this session (two changes: one-launch batching instead of two chunks, and 2x2 register blocking on the tiled GEMM kernel, which also flipped Q4_0 from "naive wins" to "tiled wins") — about 1.26x behind their 8.87ms/signal, the closest this repo has gotten. Numerical fidelity is unaffected: `t0-fast`'s Q8_0/Q4_0-resident forecasts still match Burn's own quantized path to kernel-level float rounding (~1-2e-6 max-abs, unchanged parity gate) and the tiled-kernel unit tests (naive-vs-tiled agreement to 1e-5) pass for all three residencies at both `m=1` and `m=40`. What's still open: the official 8192-context protocol's CRPS/MASE cells are blank for `t0-fast` (blocked on autoregressive rollout, no backend in this repo has it); the native numbers are, oddly, all slower than the browser numbers for the same engine and quantization (Q8_0 native 101.9ms vs browser 34.5ms) — not yet explained, flagged as a follow-up rather than chased further (see `docs/runs/2026-09-20-perf.md` for a 20-minute look this session); and batch-24 is still ~1.26x behind ORT's 8.87ms/signal, single-forecast is unaffected by any of this session's changes (both quantized rows' `M=17` rows/call stay under the `M>=32` tiled threshold, so single-call latency runs the same naive kernel as before).
 
 Analysis and exact commands: `docs/runs/2026-09-20-head-to-head.md`.
+
+## Beta (curiosity row) — parity, sizes, drift, official-protocol subset
+
+- Machine: Apple M2 (Darwin 25.3.0), `ndarray` (CPU) backend throughout (native cargo build + Python reference, no GPU job).
+- Commit: `a6b7b08` + this doc's commit.
+- Checkpoint: `theforecastingcompany/t0-beta` (HF, Apache-2.0, not gated), `hf download` into `~/Code/idle-intelligence/models/hf/theforecastingcompany/t0-beta` (config.json 478 bytes, `model.safetensors` 1,022,492,908 bytes / 1022.5 MB). Config vs t0-alpha: `embed_dim` 1024 (alpha 512), `scaler_eps` 0.01 + `scaler_eps_mode` "std_clamp" (alpha's defaults: 0.1 / "variance_offset"), `quantile_levels` 21 levels 0.01..0.99 (alpha: 5, 0.1..0.9); `num_layers` 24, `group_every_n` 3, `num_heads` 8, `mlp_hidden_dim` 2048, `patch_size` 32 — identical to alpha. No new ops: every differing field (`embed_dim`, `scaler_eps`, `scaler_eps_mode`, `quantile_levels`) is already a config-driven path in `crates/t0-core` (`config.rs`, `scaler.rs` already implements both `variance_offset` and `std_clamp`), so beta is a pure weights+config swap through the same `T0Model`/`Weights`/CLI.
+
+### Parity (native, F32, CPU/ndarray)
+
+- Fixtures: `tools/make_fixtures.py beta` (extended to take `alpha|beta`; beta writes to `fixtures/beta/`, uses beta's own 21 trained quantile levels — same "no rollout interpolation" reasoning as alpha). Context 512, horizon 96.
+- Command: `t0-cli parity --fixtures fixtures/beta --weights .../t0-beta/model.safetensors --config .../t0-beta/config.json`
+
+| case | quantile max-abs err | quantile max-rel err | patch-embedding max-abs err | layer-0-output max-abs err |
+|---|---|---|---|---|
+| case0_univariate_sine | 2.503395e-6 | 2.584135e-2 | 1.525879e-4 | 1.525879e-4 |
+| case1_trivariate_freqs | 2.503395e-6 | 2.016297e-3 | 1.525879e-4 | 1.373291e-4 |
+| case2_masked_gap | 1.549721e-6 | 2.820918e-4 | 1.525879e-4 | 1.525879e-4 |
+
+Gate: max-abs quantile error <= 1e-4. Result: PASS (worst case 2.503395e-6 — same 1e-6 class as alpha's 1.192093e-6).
+
+### GGUF export sizes
+
+`t0-cli export-gguf --weights model.safetensors --config config.json --quant <f16|q8_0|q4_0> --out t0-beta-<q>.gguf`, from 1022.5 MB F32 safetensors:
+
+| quant | file MB | ratio to F32 |
+|---|---|---|
+| f16 | 511.3 | 0.500x |
+| q8_0 | 275.3 | 0.269x |
+| q4_0 | 149.5 | 0.146x |
+
+### Drift, apples to apples with the published INT8 card
+
+Same protocol as alpha's Milestone 1a+ row: `t0-cli drift --weights-f32 model.safetensors --config config.json --quant <gguf|int8-theirs> --cases 54 --seed 42`; reference = our F32 forward pass (== PyTorch by the parity gate above); drift = `|error| / (max(reference) - min(reference))` over the whole forecast.
+
+| quant | mean drift worst % | mean drift mean % | point drift worst % | point drift mean % | file MB |
+|---|---|---|---|---|---|
+| f16 | 0.0175 | 0.0064 | 0.0506 | 0.0253 | 511.3 |
+| q8_0 | 0.2046 | 0.0590 | 1.0563 | 0.3245 | 275.3 |
+| q4_0 | 2.5493 | 0.8962 | 14.5800 | 5.1684 | 149.5 |
+| int8-theirs (per-channel INT8, 96 matmuls; 6 I/O projections FP32) | 0.4027 | 0.1197 | 1.4333 | 0.5504 | 260.5 (estimated) |
+| **their published t0-beta INT8** (`t0-beta-onnx-int8`, real card, different case generator) | **0.2271** | — | **9.393** | — | 269.1 |
+
+Beta's drift is not uniformly worse or better than alpha's: Q8_0 mean-drift-worst is *tighter* on beta (0.20% vs alpha's 0.53%) but Q4_0 point-drift-worst is *looser* (14.58% vs alpha's 8.42%) — read as embed_dim 1024 (2x alpha) giving per-channel Q8_0 blocks more values to average error over, while Q4_0's fixed 32-value block granularity doesn't scale with width, so the roughest quant degrades faster on the wider model. Our q8_0 (0.20%/1.06%) beats their published beta INT8 card (0.2271%/9.393%) on mean drift and is far tighter on point drift; our int8-theirs reproduction (0.40%/1.43%) is close to their published number, as with alpha.
+
+### Official-protocol 8-config subset (their code, full protocol)
+
+Alpha's existing subset table used the port's own `t0-cli gifteval` (context capped to 512, no autoregressive rollout). For beta this task used the *other* runner instead — `run_gifteval.py`'s official-protocol harness (`gift_eval.data.Dataset` windowing, `gluonts.model.evaluate_model`, `t0.evaluation.T0Predictor`, `CONTEXT_LENGTH=8192`, full test split, no subsampling) — because that script lives in a different worktree (`fullsuite`) that this task must not edit, a beta-scoped copy was made instead: `tools/fullsuite_gifteval_beta.py` (same CONFIGS, same metrics, same `dequant_gguf.read_gguf` import, only the weights dir/gguf naming point at t0-beta). All 8 configs completed for all 3 variants (f32 reference, q8_0, q4_0 fake-quant dequantized back to f32 into the same PyTorch architecture), no time-box triggered (`--max-minutes 20`, actual wall time 4-5 min each).
+
+CRPS (`mean_weighted_sum_quantile_loss`) / MASE per config:
+
+| task | f32 CRPS | q8_0 CRPS | q4_0 CRPS | f32 MASE | q8_0 MASE | q4_0 MASE |
+|---|---|---|---|---|---|---|
+| us_births/D/short | 0.01789 | 0.01789 | 0.01822 | 0.3483 | 0.3483 | 0.3546 |
+| saugeen/D/short | 0.35264 | 0.35242 | 0.35171 | 2.9997 | 2.9991 | 2.9939 |
+| jena_weather/D/short | 0.04479 | 0.04480 | 0.04456 | 0.9874 | 0.9874 | 0.9848 |
+| solar/W/short | 0.13194 | 0.13183 | 0.13330 | 0.8965 | 0.8953 | 0.9047 |
+| solar/D/short | 0.27274 | 0.27286 | 0.27351 | 0.9729 | 0.9732 | 0.9688 |
+| loop_seattle/D/short | 0.03812 | 0.03809 | 0.03791 | 0.8066 | 0.8058 | 0.8023 |
+| electricity/W/short | 0.04765 | 0.04758 | 0.04798 | 1.4744 | 1.4736 | 1.4912 |
+| electricity/D/short | 0.05375 | 0.05375 | 0.05391 | 1.4045 | 1.4043 | 1.4026 |
+| **aggregate (geometric mean)** | **0.0749** | **0.0749** | **0.0752** | **1.0522** | **1.0519** | **1.0552** |
+
+Both quants track the f32 reference to within ~0.4% on the aggregate for both metrics, no config regresses more than ~1.5% relative — consistent with alpha's own subset finding that CRPS/MASE are far less quant-sensitive than the raw drift metric above. This subset (8 energy/weather/transport-heavy daily/weekly configs) is not the published 97-config GIFT-Eval protocol, so its absolute CRPS/MASE (~0.075 / ~1.05) are not comparable to the published beta numbers (CRPS 0.4738 / MASE 0.6865, `docs/reports/t0-published-numbers.md`) — same caveat as alpha's subset table. What this subset does support: our quantization does not measurably hurt beta's accuracy at the official 8192-context protocol, same conclusion as alpha.
+
+Commands, full timing breakdown per config: `docs/runs/2026-09-20-beta.md`.
+
+## Beta on t0-fast (WGSL/raw-wgpu engine, native)
+
+- Machine: Apple M2 (Darwin 25.3.0), Apple Metal via raw `wgpu`
+  (`crates/t0-fast`, not Burn), no other GPU job running. Commit `f99e3bb`
+  (fixed a `HEAD_DIM=64` hardcode in `crates/t0-fast` that previously
+  blocked beta entirely — see `docs/runs/2026-09-20-beta-fast.md`).
+- Command shape: `t0-cli bench --backend fast --fast-quant <q8_0|q4_0>
+  --signals <1|24> --context 512 --horizon 32 --chunk 24 --reps 20
+  --warmup 3`, median of 20 reps after 3 warmup reps, alpha and beta run
+  in the same session for direct comparability.
+
+Parity (max-abs quantile error, gate <=1e-4 for F32):
+
+| model | quant | worst-case max-abs err |
+|---|---|---|
+| t0-alpha | f32 | 1.251698e-6 |
+| t0-beta | f32 | 3.218651e-6 |
+| t0-beta | q8_0 | 3.337860e-6 |
+| t0-beta | q4_0 | 3.218651e-6 |
+
+Native latency, median of 20 reps (ms/signal):
+
+| model | quant | single | batch-24 |
+|---|---|---|---|
+| t0-alpha | q8_0 | 102.5555 | 22.9002 |
+| t0-alpha | q4_0 | 73.1752 | 22.9805 |
+| t0-beta | q8_0 | 219.2922 | 54.6319 |
+| t0-beta | q4_0 | 145.2537 | 54.5032 |
+
+Beta's F32 parity passes the same 1e-4 gate as alpha, at the same 1e-6
+order of magnitude. Beta's single-forecast latency is ~2.0x-2.1x alpha's
+at matched context/horizon (Q8_0 2.14x, Q4_0 1.99x); batch-24 per-signal
+latency is ~2.4x higher for beta (Q8_0 2.39x, Q4_0 2.37x). Drift on
+t0-fast matches the CPU/Burn reference path
+(`docs/runs/2026-09-20-beta.md`) to 3 significant digits for both Q8_0
+(0.2047% vs 0.2046% mean-drift-worst) and Q4_0 (2.5494% vs 2.5493%). Full
+detail: `docs/runs/2026-09-20-beta-fast.md`.

@@ -14,6 +14,9 @@ __pycache__/
 fixtures/gifteval/*.f32
 fixtures/gifteval/scores_*.csv
 fixtures/gifteval/forecasts_*/
+fixtures/beta/gguf/
+fixtures/gguf/
+/results/
 bench/onnx/*.onnx
 bench/onnx/ort*.js
 bench/onnx/ort*.mjs
