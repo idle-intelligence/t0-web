@@ -7,12 +7,15 @@
 use std::borrow::Cow;
 use wgpu::util::DeviceExt;
 
-use crate::pool::Pool;
-
+/// Device, queue and pipelines only -- no `Pool`. A `Pool` is per-`GpuModel`
+/// (see `model.rs`'s `GpuModel::pool`), not per-`Engine`: two models can
+/// share one `Engine` (same device/queue/pipelines, which are stateless and
+/// safe to reuse) but must never share a `Pool`, since its bind-group cache
+/// keys are bare call-site strings with no per-model/per-quant component
+/// (see `pool.rs`'s module doc and docs/runs/2026-09-20-compare-page.md).
 pub struct Engine {
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
-    pub pool: Pool,
     pub linear: wgpu::ComputePipeline,
     pub linear_tiled: wgpu::ComputePipeline,
     pub linear_q8: wgpu::ComputePipeline,
@@ -68,7 +71,6 @@ impl Engine {
             .map_err(|e| anyhow::anyhow!("no wgpu device: {e}"))?;
 
         Ok(Engine {
-            pool: Pool::new(device.clone(), queue.clone()),
             linear: make_pipeline(&device, "linear", include_str!("shaders/linear.wgsl")),
             linear_tiled: make_pipeline(&device, "linear_tiled", include_str!("shaders/linear_tiled.wgsl")),
             linear_q8: make_pipeline(&device, "linear_q8", include_str!("shaders/linear_q8.wgsl")),

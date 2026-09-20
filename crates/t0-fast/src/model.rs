@@ -17,6 +17,7 @@ use t0_core::mask::{build_group_mask, build_time_mask, patch_attendable, reduce_
 use t0_core::{T0Config, Weights};
 
 use crate::engine::Engine;
+use crate::pool::Pool;
 use crate::quant::{load_matmul_weight, load_matmul_weight_gguf, MatMulWeight, WeightQuant};
 use crate::rope_tables::RopeTables;
 
@@ -174,6 +175,16 @@ pub struct GpuModel {
     layers: Vec<LayerBuf>,
     out_norm_scale: wgpu::Buffer,
     decoder: ResidualBlockBuf,
+    /// This model's own working-buffer/bind-group pool -- never shared with
+    /// another `GpuModel`, even one built from the same `Engine` (same
+    /// device/queue/pipelines). Pool cache keys are bare call-site strings
+    /// with no per-model or per-weight-quant-type component (see
+    /// `pool.rs`'s module doc), so two models sharing one `Pool` would
+    /// silently reuse each other's bind groups -- which are bound to the
+    /// *previous* model's weight buffers -- whenever both hit the same
+    /// `(v, p)` shape. See docs/runs/2026-09-20-compare-page.md for the
+    /// bug this was.
+    pub pool: Pool,
 }
 
 impl GpuModel {
@@ -193,7 +204,7 @@ impl GpuModel {
     }
 
     /// Every persistent GPU buffer this model holds (weights only -- not
-    /// the per-forward `Pool` working set, see `Engine::pool`'s
+    /// the per-forward `Pool` working set, see `GpuModel::pool`'s
     /// `resident_bytes`). The GPU-memory report a browser page can show.
     pub fn total_weight_bytes(&self) -> u64 {
         let mut total = Self::residual_block_bytes(&self.patch_encoder) + self.type_embeddings.size() + self.out_norm_scale.size() + Self::residual_block_bytes(&self.decoder);
@@ -334,6 +345,7 @@ impl GpuModel {
             layers,
             out_norm_scale,
             decoder,
+            pool: Pool::new(engine.device.clone(), engine.queue.clone()),
         })
     }
 
@@ -387,6 +399,7 @@ impl GpuModel {
             layers,
             out_norm_scale,
             decoder,
+            pool: Pool::new(engine.device.clone(), engine.queue.clone()),
         })
     }
 }
@@ -394,6 +407,7 @@ impl GpuModel {
 #[allow(clippy::too_many_arguments)]
 fn linear(
     engine: &Engine,
+    pool: &Pool,
     encoder: &mut wgpu::CommandEncoder,
     key: &str,
     x: &wgpu::Buffer,
@@ -404,7 +418,6 @@ fn linear(
     out_dim: u32,
     act: u32,
 ) -> wgpu::Buffer {
-    let pool = &engine.pool;
     let out = pool.data(&format!("{key}.out"), (rows * out_dim) as usize);
     // Naive kernels are one thread per output element on a 16x16 workgroup
     // (div_ceil(16) each axis); the tiled f32/Q8_0 kernels use 2x2 register
@@ -492,8 +505,7 @@ fn linear(
     out
 }
 
-fn add_inplace(engine: &Engine, encoder: &mut wgpu::CommandEncoder, key: &str, a: &wgpu::Buffer, b: &wgpu::Buffer, len: u32) {
-    let pool = &engine.pool;
+fn add_inplace(engine: &Engine, pool: &Pool, encoder: &mut wgpu::CommandEncoder, key: &str, a: &wgpu::Buffer, b: &wgpu::Buffer, len: u32) {
     let dims = pool.uniform(&format!("{key}.dims"), AddDims { len, _p0: 0, _p1: 0, _p2: 0 });
     let bg = pool.bind_group(
         key,
@@ -507,8 +519,8 @@ fn add_inplace(engine: &Engine, encoder: &mut wgpu::CommandEncoder, key: &str, a
     engine.dispatch(encoder, &engine.add_inplace, &bg, (len.div_ceil(256), 1, 1), key);
 }
 
-fn rmsnorm_full(engine: &Engine, encoder: &mut wgpu::CommandEncoder, key: &str, x: &wgpu::Buffer, scale: &wgpu::Buffer, rows: u32, dim: u32) -> wgpu::Buffer {
-    let pool = &engine.pool;
+#[allow(clippy::too_many_arguments)]
+fn rmsnorm_full(engine: &Engine, pool: &Pool, encoder: &mut wgpu::CommandEncoder, key: &str, x: &wgpu::Buffer, scale: &wgpu::Buffer, rows: u32, dim: u32) -> wgpu::Buffer {
     let out = pool.data(&format!("{key}.out"), (rows * dim) as usize);
     let dims = pool.uniform(&format!("{key}.dims"), RmsFullDims { rows, dim, _p0: 0, _p1: 0 });
     let bg = pool.bind_group(
@@ -528,6 +540,7 @@ fn rmsnorm_full(engine: &Engine, encoder: &mut wgpu::CommandEncoder, key: &str, 
 #[allow(clippy::too_many_arguments)]
 fn rmsnorm_qk(
     engine: &Engine,
+    pool: &Pool,
     encoder: &mut wgpu::CommandEncoder,
     key: &str,
     buf: &wgpu::Buffer,
@@ -537,7 +550,6 @@ fn rmsnorm_qk(
     base_offset: u32,
     row_stride: u32,
 ) {
-    let pool = &engine.pool;
     let dims = pool.uniform(
         &format!("{key}.dims"),
         RmsQkDims { rows, heads, head_dim: HEAD_DIM, base_offset, row_stride, _p0: 0, _p1: 0, _p2: 0 },
@@ -557,6 +569,7 @@ fn rmsnorm_qk(
 #[allow(clippy::too_many_arguments)]
 fn rope(
     engine: &Engine,
+    pool: &Pool,
     encoder: &mut wgpu::CommandEncoder,
     key: &str,
     buf: &wgpu::Buffer,
@@ -569,7 +582,6 @@ fn rope(
     row_stride: u32,
     seq_len: u32,
 ) {
-    let pool = &engine.pool;
     let dims = pool.uniform(
         &format!("{key}.dims"),
         RopeDims { rows, heads, head_dim: HEAD_DIM, base_offset, row_stride, seq_len, _p0: 0, _p1: 0 },
@@ -597,9 +609,8 @@ fn rope(
 /// `seq`; this assert only catches a config this crate has never been
 /// exercised against.
 #[allow(clippy::too_many_arguments)]
-fn attention(engine: &Engine, encoder: &mut wgpu::CommandEncoder, key: &str, qkv: &wgpu::Buffer, mask: &wgpu::Buffer, outer: u32, seq: u32, heads: u32, embed: u32) -> wgpu::Buffer {
+fn attention(engine: &Engine, pool: &Pool, encoder: &mut wgpu::CommandEncoder, key: &str, qkv: &wgpu::Buffer, mask: &wgpu::Buffer, outer: u32, seq: u32, heads: u32, embed: u32) -> wgpu::Buffer {
     debug_assert!(seq <= 256, "seq_len {seq} exceeds MAX_SEQ=256 in attention.wgsl");
-    let pool = &engine.pool;
     let qkv_stride = 3 * embed;
     let out = pool.data(&format!("{key}.out"), (outer * seq * embed) as usize);
     let dims = pool.uniform(
@@ -629,8 +640,8 @@ fn attention(engine: &Engine, encoder: &mut wgpu::CommandEncoder, key: &str, qkv
     out
 }
 
-fn transpose_outer(engine: &Engine, encoder: &mut wgpu::CommandEncoder, key: &str, src: &wgpu::Buffer, a: u32, b: u32, e: u32) -> wgpu::Buffer {
-    let pool = &engine.pool;
+#[allow(clippy::too_many_arguments)]
+fn transpose_outer(engine: &Engine, pool: &Pool, encoder: &mut wgpu::CommandEncoder, key: &str, src: &wgpu::Buffer, a: u32, b: u32, e: u32) -> wgpu::Buffer {
     let dst = pool.data(&format!("{key}.out"), (a * b * e) as usize);
     let dims = pool.uniform(&format!("{key}.dims"), TransposeDims { a, b, e, _p0: 0 });
     let bg = pool.bind_group(
@@ -646,8 +657,7 @@ fn transpose_outer(engine: &Engine, encoder: &mut wgpu::CommandEncoder, key: &st
     dst
 }
 
-fn silu_mul(engine: &Engine, encoder: &mut wgpu::CommandEncoder, key: &str, src: &wgpu::Buffer, rows: u32, hidden: u32) -> wgpu::Buffer {
-    let pool = &engine.pool;
+fn silu_mul(engine: &Engine, pool: &Pool, encoder: &mut wgpu::CommandEncoder, key: &str, src: &wgpu::Buffer, rows: u32, hidden: u32) -> wgpu::Buffer {
     let out = pool.data(&format!("{key}.out"), (rows * hidden) as usize);
     let dims = pool.uniform(&format!("{key}.dims"), SiluDims { rows, hidden, _p0: 0, _p1: 0 });
     let bg = pool.bind_group(
@@ -663,14 +673,14 @@ fn silu_mul(engine: &Engine, encoder: &mut wgpu::CommandEncoder, key: &str, src:
     out
 }
 
-fn residual_block(engine: &Engine, encoder: &mut wgpu::CommandEncoder, key: &str, x: &wgpu::Buffer, rows: u32, w: &ResidualBlockBuf) -> wgpu::Buffer {
+fn residual_block(engine: &Engine, pool: &Pool, encoder: &mut wgpu::CommandEncoder, key: &str, x: &wgpu::Buffer, rows: u32, w: &ResidualBlockBuf) -> wgpu::Buffer {
     let hidden_w = MatMulWeight::F32 { w: w.hidden_w.clone() };
     let output_w = MatMulWeight::F32 { w: w.output_w.clone() };
     let residual_w = MatMulWeight::F32 { w: w.residual_w.clone() };
-    let hidden = linear(engine, encoder, &format!("{key}.hidden"), x, rows, w.in_dim, &hidden_w, &w.hidden_b, w.hidden_dim, 1);
-    let out = linear(engine, encoder, &format!("{key}.out"), &hidden, rows, w.hidden_dim, &output_w, &w.output_b, w.out_dim, 0);
-    let residual = linear(engine, encoder, &format!("{key}.residual"), x, rows, w.in_dim, &residual_w, &w.residual_b, w.out_dim, 0);
-    add_inplace(engine, encoder, &format!("{key}.add"), &out, &residual, rows * w.out_dim);
+    let hidden = linear(engine, pool, encoder, &format!("{key}.hidden"), x, rows, w.in_dim, &hidden_w, &w.hidden_b, w.hidden_dim, 1);
+    let out = linear(engine, pool, encoder, &format!("{key}.out"), &hidden, rows, w.hidden_dim, &output_w, &w.output_b, w.out_dim, 0);
+    let residual = linear(engine, pool, encoder, &format!("{key}.residual"), x, rows, w.in_dim, &residual_w, &w.residual_b, w.out_dim, 0);
+    add_inplace(engine, pool, encoder, &format!("{key}.add"), &out, &residual, rows * w.out_dim);
     out
 }
 
@@ -716,10 +726,10 @@ pub async fn forward_async(engine: &Engine, model: &GpuModel, series: &TimeSerie
     let rope_tables = RopeTables::new(p as usize, HEAD_DIM as usize);
 
     let mut encoder = engine.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("t0-fast forward") });
-    let pool = &engine.pool;
+    let pool = &model.pool;
 
     let concat_buf = pool.upload_f32("concat", &concat);
-    let x = residual_block(engine, &mut encoder, "patch_enc", &concat_buf, rows, &model.patch_encoder);
+    let x = residual_block(engine, pool, &mut encoder, "patch_enc", &concat_buf, rows, &model.patch_encoder);
 
     let idx_buf = pool.upload_u32("type_idx", &type_idx);
     let gather_dims = pool.uniform("gather.dims", GatherDims { rows, embed, _p0: 0, _p1: 0 });
@@ -744,39 +754,39 @@ pub async fn forward_async(engine: &Engine, model: &GpuModel, series: &TimeSerie
 
     for (i, layer) in model.layers.iter().enumerate() {
         let lk = |s: &str| format!("layer{i}.{s}");
-        let normed = rmsnorm_full(engine, &mut encoder, &lk("norm"), &x, &layer.norm_scale, rows, embed);
+        let normed = rmsnorm_full(engine, pool, &mut encoder, &lk("norm"), &x, &layer.norm_scale, rows, embed);
 
         let attn_out = match layer.ty {
             LayerType::Time => {
-                let qkv = linear(engine, &mut encoder, &lk("qkv"), &normed, rows, embed, &layer.w_qkv, &layer.b_qkv, 3 * embed, 0);
-                rmsnorm_qk(engine, &mut encoder, &lk("qnorm"), &qkv, &layer.q_norm, rows, heads, 0, 3 * embed);
-                rmsnorm_qk(engine, &mut encoder, &lk("knorm"), &qkv, &layer.k_norm, rows, heads, embed, 3 * embed);
-                rope(engine, &mut encoder, &lk("ropeq"), &qkv, &cos_buf, &sin_buf, &scale_buf, rows, heads, 0, 3 * embed, p);
-                rope(engine, &mut encoder, &lk("ropek"), &qkv, &cos_buf, &sin_buf, &scale_inv_buf, rows, heads, embed, 3 * embed, p);
-                let attn_pre = attention(engine, &mut encoder, &lk("attn"), &qkv, &time_mask_buf, v, p, heads, embed);
-                linear(engine, &mut encoder, &lk("wo"), &attn_pre, rows, embed, &layer.w_o, &layer.b_o, embed, 0)
+                let qkv = linear(engine, pool, &mut encoder, &lk("qkv"), &normed, rows, embed, &layer.w_qkv, &layer.b_qkv, 3 * embed, 0);
+                rmsnorm_qk(engine, pool, &mut encoder, &lk("qnorm"), &qkv, &layer.q_norm, rows, heads, 0, 3 * embed);
+                rmsnorm_qk(engine, pool, &mut encoder, &lk("knorm"), &qkv, &layer.k_norm, rows, heads, embed, 3 * embed);
+                rope(engine, pool, &mut encoder, &lk("ropeq"), &qkv, &cos_buf, &sin_buf, &scale_buf, rows, heads, 0, 3 * embed, p);
+                rope(engine, pool, &mut encoder, &lk("ropek"), &qkv, &cos_buf, &sin_buf, &scale_inv_buf, rows, heads, embed, 3 * embed, p);
+                let attn_pre = attention(engine, pool, &mut encoder, &lk("attn"), &qkv, &time_mask_buf, v, p, heads, embed);
+                linear(engine, pool, &mut encoder, &lk("wo"), &attn_pre, rows, embed, &layer.w_o, &layer.b_o, embed, 0)
             }
             LayerType::Group => {
-                let normed_t = transpose_outer(engine, &mut encoder, &lk("tr1"), &normed, v, p, embed);
-                let qkv = linear(engine, &mut encoder, &lk("qkv"), &normed_t, rows, embed, &layer.w_qkv, &layer.b_qkv, 3 * embed, 0);
-                rmsnorm_qk(engine, &mut encoder, &lk("qnorm"), &qkv, &layer.q_norm, rows, heads, 0, 3 * embed);
-                rmsnorm_qk(engine, &mut encoder, &lk("knorm"), &qkv, &layer.k_norm, rows, heads, embed, 3 * embed);
-                let attn_pre = attention(engine, &mut encoder, &lk("attn"), &qkv, &group_mask_buf, p, v, heads, embed);
-                let attn_out_t = linear(engine, &mut encoder, &lk("wo"), &attn_pre, rows, embed, &layer.w_o, &layer.b_o, embed, 0);
-                transpose_outer(engine, &mut encoder, &lk("tr2"), &attn_out_t, p, v, embed)
+                let normed_t = transpose_outer(engine, pool, &mut encoder, &lk("tr1"), &normed, v, p, embed);
+                let qkv = linear(engine, pool, &mut encoder, &lk("qkv"), &normed_t, rows, embed, &layer.w_qkv, &layer.b_qkv, 3 * embed, 0);
+                rmsnorm_qk(engine, pool, &mut encoder, &lk("qnorm"), &qkv, &layer.q_norm, rows, heads, 0, 3 * embed);
+                rmsnorm_qk(engine, pool, &mut encoder, &lk("knorm"), &qkv, &layer.k_norm, rows, heads, embed, 3 * embed);
+                let attn_pre = attention(engine, pool, &mut encoder, &lk("attn"), &qkv, &group_mask_buf, p, v, heads, embed);
+                let attn_out_t = linear(engine, pool, &mut encoder, &lk("wo"), &attn_pre, rows, embed, &layer.w_o, &layer.b_o, embed, 0);
+                transpose_outer(engine, pool, &mut encoder, &lk("tr2"), &attn_out_t, p, v, embed)
             }
         };
-        add_inplace(engine, &mut encoder, &lk("add1"), &x, &attn_out, rows * embed);
+        add_inplace(engine, pool, &mut encoder, &lk("add1"), &x, &attn_out, rows * embed);
 
-        let mlp_normed = rmsnorm_full(engine, &mut encoder, &lk("mlpnorm"), &x, &layer.mlp_norm_scale, rows, embed);
-        let w0_out = linear(engine, &mut encoder, &lk("w0"), &mlp_normed, rows, embed, &layer.w0, &layer.b0, 2 * layer.mlp_hidden, 0);
-        let gated = silu_mul(engine, &mut encoder, &lk("silu"), &w0_out, rows, layer.mlp_hidden);
-        let mlp_out = linear(engine, &mut encoder, &lk("w2"), &gated, rows, layer.mlp_hidden, &layer.w2, &layer.b2, embed, 0);
-        add_inplace(engine, &mut encoder, &lk("add2"), &x, &mlp_out, rows * embed);
+        let mlp_normed = rmsnorm_full(engine, pool, &mut encoder, &lk("mlpnorm"), &x, &layer.mlp_norm_scale, rows, embed);
+        let w0_out = linear(engine, pool, &mut encoder, &lk("w0"), &mlp_normed, rows, embed, &layer.w0, &layer.b0, 2 * layer.mlp_hidden, 0);
+        let gated = silu_mul(engine, pool, &mut encoder, &lk("silu"), &w0_out, rows, layer.mlp_hidden);
+        let mlp_out = linear(engine, pool, &mut encoder, &lk("w2"), &gated, rows, layer.mlp_hidden, &layer.w2, &layer.b2, embed, 0);
+        add_inplace(engine, pool, &mut encoder, &lk("add2"), &x, &mlp_out, rows * embed);
     }
 
-    let normed_final = rmsnorm_full(engine, &mut encoder, "out_norm", &x, &model.out_norm_scale, rows, embed);
-    let decoded = residual_block(engine, &mut encoder, "decoder", &normed_final, rows, &model.decoder); // [rows, patch_size*n_q]
+    let normed_final = rmsnorm_full(engine, pool, &mut encoder, "out_norm", &x, &model.out_norm_scale, rows, embed);
+    let decoded = residual_block(engine, pool, &mut encoder, "decoder", &normed_final, rows, &model.decoder); // [rows, patch_size*n_q]
 
     let n_q = cfg.n_quantiles() as u32;
     let quantile_rows = rows * patch_size;
@@ -842,10 +852,11 @@ mod tests {
         }
 
         let mm = load_matmul_weight(&engine, "test_w", &[n, k], &w, quant);
-        let x_buf = engine.pool.upload_f32("test_x", &x);
-        let b_buf = engine.pool.upload_f32("test_b", &bias);
+        let pool = Pool::new(engine.device.clone(), engine.queue.clone());
+        let x_buf = pool.upload_f32("test_x", &x);
+        let b_buf = pool.upload_f32("test_b", &bias);
         let mut encoder = engine.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-        let out = linear(&engine, &mut encoder, "test_linear", &x_buf, m as u32, k as u32, &mm, &b_buf, n as u32, 0);
+        let out = linear(&engine, &pool, &mut encoder, "test_linear", &x_buf, m as u32, k as u32, &mm, &b_buf, n as u32, 0);
         engine.queue.submit(Some(encoder.finish()));
         let got = pollster::block_on(engine.read_buffer(&out, m * n));
 

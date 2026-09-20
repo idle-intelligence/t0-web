@@ -85,11 +85,13 @@ impl T0Wasm {
 
     /// Sum of every GPU buffer this instance holds: persistent weights
     /// (`GpuModel::total_weight_bytes`) plus the per-forward `Pool`
-    /// working set (`Engine::pool::resident_bytes`, 0 before the first
+    /// working set (`GpuModel::pool::resident_bytes`, 0 before the first
     /// `forecast`/`forecastBatch` call). For the browser GPU-memory report.
+    /// This model's own `Pool`, not a process-wide one -- see
+    /// `GpuModel::pool`'s doc comment.
     #[wasm_bindgen(js_name = gpuBytes)]
     pub fn gpu_bytes(&self) -> f64 {
-        (self.model.total_weight_bytes() + engine().pool.resident_bytes()) as f64
+        (self.model.total_weight_bytes() + self.model.pool.resident_bytes()) as f64
     }
 
     /// One forward pass, one signal (`v = 1`). Same contract as the Burn
