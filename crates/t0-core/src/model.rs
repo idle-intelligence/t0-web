@@ -651,7 +651,14 @@ pub fn forecast_rollout<B: Backend>(
         prev_width = horizon;
         prev_block = reduced.clone();
         out_chunks.push(reduced);
-        remaining -= horizon;
+        // `horizon` is rounded up to a whole patch, so it can exceed
+        // `remaining` on the last block (e.g. remaining=176, patch_size=32
+        // -> horizon=192) -- saturating_sub avoids a usize underflow (which
+        // wraps to a huge value in release builds and turns this into a
+        // runaway AR loop; see docs/runs/2026-09-20-rollout.md's "fast"
+        // stall). The final `out.truncate(prediction_length * n_query)`
+        // already drops the overshoot.
+        remaining = remaining.saturating_sub(horizon);
     }
     let mut out: Vec<f32> = out_chunks.concat();
     out.truncate(prediction_length * n_query);

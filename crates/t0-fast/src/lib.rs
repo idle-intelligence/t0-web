@@ -228,7 +228,10 @@ pub fn forecast_rollout(
         prev_width = horizon;
         prev_block = reduced.clone();
         out_chunks.push(reduced);
-        remaining -= horizon;
+        // See t0_core::model::forecast_rollout's comment on the same line:
+        // horizon rounds up to a whole patch and can exceed remaining on
+        // the last block, so this must saturate, not wrap.
+        remaining = remaining.saturating_sub(horizon);
     }
     let mut out: Vec<f32> = out_chunks.concat();
     out.truncate(prediction_length * n_query);
