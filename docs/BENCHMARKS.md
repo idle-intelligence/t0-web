@@ -221,6 +221,16 @@ Analysis: `docs/runs/2026-09-19-latency-cpu.md`.
 
 wgpu is slower than native ndarray CPU at this batch size (n_signals=1) — expected, per-dispatch overhead of many small unbatched GPU kernel launches dominates; wgpu only wins once batched (see the "chunked wgpu batch" table above, ~38-52 ms/signal at n=100-1000). Analysis: `docs/runs/2026-09-19-latency-wgpu.md`.
 
+**Re-measured 2026-09-20, quiet, with `burn-wgpu`'s `fusion` feature** (the 705-946 ms warm numbers above were flagged as "under contention" in the earlier run — this re-run confirms GPU idle first, `pgrep` for `llm-life`/`jacobi`/`eval-metrics` showed only unrelated static file servers, no GPU-touching process). Same commands as above, `t0-cli` rebuilt with the fusion-enabled `Cargo.toml` (`docs/runs/2026-09-20-perf.md`):
+
+| quant | file MB | load time (s) | cold first-call (ms) | warm median forward latency (ms) |
+|---|---|---|---|---|
+| F32 | 406.6 | 0.202 | 316.5 | 224.2 |
+| Q8_0 | 108.9 | 0.202-0.232 | 793.0 | 224.2 |
+| Q4_0 | 58.6 | 0.169-0.186 | 300.6 | 224.1 |
+
+Warm latency now converges to ~224 ms across all quants regardless of storage format (compute is F32 for all of them, dequant happens once at load — the same fact the CPU table above establishes), a 2.9-3.3x improvement over the previous (contended) 705-946 ms figures. Q8_0's cold-start (793 ms) is an outlier vs F32/Q4_0 (~300-317 ms) — not re-investigated this session, plausibly an autotune cache miss specific to the Q8_0 dequant-then-matmul shape combination on first call.
+
 ### WebGPU (browser)
 
 - Machine: Apple M2 (Darwin 25.3.0), Playwright's bundled Chromium-for-Testing (`chromium-1229`, `150.0.7871.24`), GPU confirmed idle before this run.
@@ -270,13 +280,15 @@ Analysis: `docs/runs/2026-09-19-web-smoke.md`.
 | | download MB | cold ms | warm ms (median of 10) | 24-signal batch ms/signal | drift max-abs (% of window range) | official-protocol subset CRPS (aggregate) | official-protocol subset MASE (aggregate) |
 |---|---|---|---|---|---|---|---|
 | their ONNX INT8 (WebGPU EP) | 107.2 | 167.5 | 64.0 | 8.87 | 0.79% | 0.0818 | 1.1272 |
-| our Q8_0 WebGPU | 108.9 | 707.1 | 162.5 | 46.07 | 0.20% | 0.0818 | 1.1276 |
-| our Q4_0 WebGPU | 58.6 | 276.6 | 162.7 | 33.49 | 3.84% | 0.0821 | 1.1332 |
-| our Q8_0 CPU (ndarray/wasm) | 108.9 | 604.9 | 576.4 | 320.57 | 0.20% | 0.0818 | 1.1276 |
+| our Q8_0 WebGPU (with `burn-wgpu` `fusion`) | 108.9 | 296.7 | 169.3 | 34.0 | 0.20% | 0.0818 | 1.1276 |
+| our Q4_0 WebGPU (with `burn-wgpu` `fusion`) | 58.6 | 303.5 | 169.8 | 34.2 | 3.84% | 0.0821 | 1.1332 |
+| our Q8_0 CPU (ndarray/wasm) | 108.9 | 577.0 | 549.9 | 311.0 | 0.20% | 0.0818 | 1.1276 |
 | reference F32 (their code) | — | — | — | — | — | 0.0818 | 1.1278 |
+
+Fusion row is this session's state, `docs/runs/2026-09-20-perf.md` — pre-fusion numbers for the WebGPU rows (707.1/162.5/46.07 for Q8_0, 276.6/162.7/33.49 for Q4_0) are the previous session's baseline, kept in that doc for comparison rather than duplicated here.
 
 Footnote — earlier context-512-capped, subsampled, Burn-engine-only numbers (not protocol-comparable, kept for orientation only, see that doc's own caveat): reference F32 0.0897 / 1.2139, our F32 0.0897 / 1.2139, our Q8_0 0.0897 / 1.2139, our Q4_0 0.0898 / 1.2157 (`docs/runs/2026-09-19-gifteval-subset.md`).
 
-**Quotable paragraph.** On the same M2, same headless Chromium build, same `us_births` window (context 512, horizon 32), their official `t0-alpha-onnx-int8` export ran on onnxruntime-web's WebGPU execution provider (no WASM fallback needed) and is faster per call than our current WebGPU port — 64 ms warm vs our 162.5 ms (Q8_0) / 162.7 ms (Q4_0), and 8.9 ms/signal vs our 33-46 ms/signal in a 24-signal batch — a gap consistent with their ONNX Runtime graph being one fused, already-optimized kernel pipeline against our per-op Burn/wgpu dispatch chain, not a claim that our approach can't close it. Where we are ahead: numerical fidelity to the shared F32 reference on this window (our Q8_0 max-abs drift is 0.20% of the forecast range vs their INT8 export's 0.79%, i.e. about 4x tighter) and file size at the low end (our Q4_0 is 58.6 MB vs their 107.2 MB, 45% smaller, at 3.84% drift — a different point on the size/accuracy curve, not a strict win). At the official protocol (their code, 8192 context, full test split, 8 configs), all four variants land within ~0.5% of each other and of the f32 reference on both CRPS and MASE — our quantization ladder is not measurably worse than their own INT8 export at this protocol. Our CPU/wasm path (Q8_0, 576 ms warm) is not competitive with either WebGPU number and isn't the intended fast path. Bottom line: beaten on raw per-call latency by their shipped, already-optimized ONNX export; matched on accuracy at the official protocol; ahead on single-window quantization fidelity and offering a materially smaller file at the low end — "faster and better" is not yet true simultaneously, and this table is the honest split.
+**Quotable paragraph.** On the same M2, same headless Chromium build, same `us_births` window (context 512, horizon 32), their official `t0-alpha-onnx-int8` export ran on onnxruntime-web's WebGPU execution provider (no WASM fallback needed) and is still faster per call than our WebGPU port after enabling `burn-wgpu`'s `fusion` feature (`docs/runs/2026-09-20-perf.md`) — 64 ms warm vs our 169.3 ms (Q8_0) / 169.8 ms (Q4_0), though the batch gap closed substantially: 8.9 ms/signal vs our 34.0-34.2 ms/signal in a 24-signal batch (down from 33-46 ms/signal pre-fusion), and cold start improved from 707/277 ms to ~300 ms for both quants. The remaining gap is consistent with their ONNX Runtime graph being one fused, already-optimized kernel pipeline against our per-op Burn/wgpu dispatch chain, not a claim that our approach can't close it further. Where we are ahead: numerical fidelity to the shared F32 reference on this window (our Q8_0 max-abs drift is 0.20% of the forecast range vs their INT8 export's 0.79%, i.e. about 4x tighter) and file size at the low end (our Q4_0 is 58.6 MB vs their 107.2 MB, 45% smaller, at 3.84% drift — a different point on the size/accuracy curve, not a strict win). At the official protocol (their code, 8192 context, full test split, 8 configs), all four variants land within ~0.5% of each other and of the f32 reference on both CRPS and MASE — our quantization ladder is not measurably worse than their own INT8 export at this protocol. Our CPU/wasm path (Q8_0, 550 ms warm) is not competitive with either WebGPU number and isn't the intended fast path. Bottom line: still beaten on both single-call and batch latency by their shipped, already-optimized ONNX export, but the batch gap narrowed from a 4-5x deficit to under 4x (34 ms/signal ours vs 8.9 ms/signal theirs) and cold-start narrowed from ~4-11x to ~2x; matched on accuracy at the official protocol; ahead on single-window quantization fidelity and offering a materially smaller file at the low end — "faster and better" is not yet true simultaneously, and this table is the honest split.
 
 Analysis and exact commands: `docs/runs/2026-09-20-head-to-head.md`.
