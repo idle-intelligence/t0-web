@@ -15,7 +15,7 @@ pub mod quant;
 mod rope_tables;
 
 use anyhow::Result;
-use t0_core::data::TimeSeries;
+use t0_core::data::{MaskType, TimeSeries, VariateType};
 use t0_core::scaler::CausalScaler;
 use t0_core::{T0Config, Weights};
 
@@ -143,6 +143,108 @@ pub async fn forecast_batch_chunked_async(
 #[allow(clippy::too_many_arguments)]
 pub fn forecast_batch_chunked(engine: &Engine, model: &GpuModel, contexts: &[f32], n_signals: usize, t_ctx: usize, horizon: usize, chunk_size: usize) -> Result<Vec<f32>> {
     pollster::block_on(forecast_batch_chunked_async(engine, model, contexts, n_signals, t_ctx, horizon, chunk_size))
+}
+
+/// Ragged variant of `forecast_batch_chunked_async`: `n_signals` independent
+/// univariate contexts of possibly *different* lengths, concatenated
+/// row-major in `contexts` per `lengths` (row `i` occupies
+/// `lengths[i]` values, no padding in the input). Each chunk of up to
+/// `chunk_size` rows is padded to a common width and run through exactly
+/// one `forecast_window_async` (one batch forward pass, one GPU submit),
+/// same as `forecast_batch_chunked_async`.
+///
+/// Parity with a standalone `forecast_async` call on one row's own
+/// (unpadded) context is exact, not approximate, because the extra
+/// left-padding a shorter row picks up here is always a whole number of
+/// `patch_size` columns on top of that row's own patch-alignment pad:
+///
+/// - `aligned_i = round_up(lengths[i], patch_size)` is exactly the width
+///   `forecast_window_async`'s own `raw.pad(patch_size, t_ctx)` would give
+///   that row alone (same `pad_left`).
+/// - `common_ctx = max(aligned_i)` is then a multiple of `patch_size` too,
+///   so `common_ctx - aligned_i` is a whole number of extra `Pad` patches
+///   prepended *before* that row's own alignment padding.
+///
+/// Whole extra `Pad` patches only shift a row's real content by whole
+/// patches (patches are fixed, non-overlapping windows), so which context
+/// values land in which patch -- and therefore every patch embedding,
+/// causal scaler stat (Missing/Pad steps are never counted), and
+/// attention mask bit for that row's real positions -- is identical to
+/// the standalone call. The extra Pad patches themselves are
+/// `patch_attendable() == false` (whole-Pad), so they're inert.
+pub async fn forecast_batch_rows_chunked_async(
+    engine: &Engine,
+    model: &GpuModel,
+    contexts: &[f32],
+    lengths: &[usize],
+    horizon: usize,
+    chunk_size: usize,
+) -> Result<Vec<f32>> {
+    let n_signals = lengths.len();
+    let patch_size = model.config.patch_size;
+    let n_q = model.config.n_quantiles();
+    let chunk_size = if chunk_size == 0 { n_signals } else { chunk_size.min(n_signals) };
+
+    let mut offsets = Vec::with_capacity(n_signals + 1);
+    let mut acc = 0usize;
+    for &l in lengths {
+        offsets.push(acc);
+        acc += l;
+    }
+    offsets.push(acc);
+    assert_eq!(contexts.len(), acc, "forecast_batch_rows: contexts.len() must equal sum(lengths)");
+
+    let round_up = |x: usize, m: usize| x.div_ceil(m) * m;
+
+    let mut out = vec![0.0f32; n_signals * horizon * n_q];
+    let mut start = 0;
+    while start < n_signals {
+        let n = chunk_size.min(n_signals - start);
+        let rows = &lengths[start..start + n];
+        let aligned: Vec<usize> = rows.iter().map(|&l| round_up(l, patch_size)).collect();
+        let common_ctx = *aligned.iter().max().unwrap();
+        let t = common_ctx + horizon;
+
+        let mut variates = vec![0.0f32; n * t];
+        let mut mask = vec![MaskType::Pad as i8; n * t];
+        let mut group_ids = vec![-1i64; n * t];
+        let mut variate_type = vec![-1i64; n * t];
+
+        for (row, &len) in rows.iter().enumerate() {
+            let src = &contexts[offsets[start + row]..offsets[start + row] + len];
+            let lead = common_ctx - len;
+            let base = row * t;
+            for (col, &x) in src.iter().enumerate() {
+                let idx = base + lead + col;
+                if x.is_nan() {
+                    variates[idx] = 0.0;
+                    mask[idx] = MaskType::Missing as i8;
+                } else {
+                    variates[idx] = x;
+                    mask[idx] = MaskType::Valid as i8;
+                }
+                group_ids[idx] = row as i64;
+                variate_type[idx] = VariateType::Target as i64;
+            }
+            for col in common_ctx..t {
+                let idx = base + col;
+                group_ids[idx] = row as i64;
+                variate_type[idx] = VariateType::Target as i64;
+                mask[idx] = MaskType::Withheld as i8;
+            }
+        }
+        let raw = TimeSeries { v: n, t, variates, mask, group_ids, variate_type };
+        let chunk_out = forecast_window_async(engine, model, raw, common_ctx, horizon).await?;
+        out[start * horizon * n_q..(start + n) * horizon * n_q].copy_from_slice(&chunk_out);
+        start += n;
+    }
+    Ok(out)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(clippy::too_many_arguments)]
+pub fn forecast_batch_rows_chunked(engine: &Engine, model: &GpuModel, contexts: &[f32], lengths: &[usize], horizon: usize, chunk_size: usize) -> Result<Vec<f32>> {
+    pollster::block_on(forecast_batch_rows_chunked_async(engine, model, contexts, lengths, horizon, chunk_size))
 }
 
 /// `t0_core::model::forecast_rollout`, ported to call this crate's own

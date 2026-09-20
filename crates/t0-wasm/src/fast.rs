@@ -100,4 +100,23 @@ impl T0Wasm {
             .await
             .expect("t0-fast forecast_batch failed")
     }
+
+    /// `n_signals` independent forecasts over *distinct* contexts (possibly
+    /// different lengths), unlike `forecastBatch`'s single-context
+    /// replication. `contexts` is every row's values concatenated
+    /// back-to-back, `lengths[i]` gives row `i`'s length (so
+    /// `contexts.len() == sum(lengths)`, no caller-side padding needed).
+    /// Chunked at `BATCH_ROWS_CHUNK` rows per GPU batch forward pass; see
+    /// `t0_fast::forecast_batch_rows_chunked_async`'s doc comment for why
+    /// each row's result matches a standalone `forecast()` call on that
+    /// row exactly.
+    #[wasm_bindgen(js_name = forecastBatchRows)]
+    pub async fn forecast_batch_rows(&self, contexts: Vec<f32>, lengths: Vec<u32>, horizon: usize) -> Vec<f32> {
+        const BATCH_ROWS_CHUNK: usize = 24;
+        let lengths: Vec<usize> = lengths.into_iter().map(|l| l as usize).collect();
+        let engine = engine();
+        t0_fast::forecast_batch_rows_chunked_async(&engine, &self.model, &contexts, &lengths, horizon, BATCH_ROWS_CHUNK)
+            .await
+            .expect("t0-fast forecast_batch_rows failed")
+    }
 }
