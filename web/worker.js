@@ -1,8 +1,7 @@
 /**
  * Web Worker: loads the t0-wasm module and model, runs every forecast.
  *
- * All inference runs here, never on the main thread (see this repo's
- * CLAUDE.md Demo section).
+ * All inference runs here, never on the main thread.
  *
  * Protocol:
  *   Main -> Worker:
