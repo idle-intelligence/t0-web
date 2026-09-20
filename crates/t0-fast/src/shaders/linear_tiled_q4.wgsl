@@ -1,6 +1,13 @@
-// Tiled shared-memory GEMM, Q4_0-resident `w` (see linear_tiled.wgsl and
-// linear_q4.wgsl). Same per-tile dequant-once trick as linear_tiled_q8.wgsl.
-const TILE: u32 = 16u;
+// Tiled shared-memory GEMM, Q4_0-resident `w`, 2x2 register blocking (see
+// linear_tiled.wgsl for the blocking scheme and linear_q4.wgsl for the
+// block-decode math). Re-measured against the naive kernel after adding
+// register blocking (docs/runs/2026-09-20-perf.md's earlier 16x16/1-output
+// tiled variant lost to naive for Q4_0; this 2x2-blocked variant amortizes
+// each dequantized b_tile element across twice the output columns/rows).
+const TM: u32 = 32u;
+const TN: u32 = 32u;
+const TK: u32 = 16u;
+const THREADS: u32 = 256u;
 
 struct Dims {
     m: u32,
@@ -20,8 +27,8 @@ struct Dims {
 @group(0) @binding(4) var<storage, read_write> out: array<f32>;
 @group(0) @binding(5) var<uniform> dims: Dims;
 
-var<workgroup> a_tile: array<array<f32, TILE>, TILE>;
-var<workgroup> b_tile: array<array<f32, TILE>, TILE>;
+var<workgroup> a_tile: array<array<f32, TK>, TM>;
+var<workgroup> b_tile: array<array<f32, TK>, TN>;
 
 fn dequant_q4(row: u32, col: u32) -> f32 {
     let blk = col / 32u;
@@ -35,43 +42,83 @@ fn dequant_q4(row: u32, col: u32) -> f32 {
     return (f32(nib) - 8.0) * scale;
 }
 
-@compute @workgroup_size(TILE, TILE)
+@compute @workgroup_size(16, 16)
 fn main(@builtin(local_invocation_id) lid: vec3<u32>, @builtin(workgroup_id) wg: vec3<u32>) {
     let tx = lid.x;
     let ty = lid.y;
-    let m0 = wg.y * TILE;
-    let n0 = wg.x * TILE;
-    let m = m0 + ty;
-    let n = n0 + tx;
+    let tid = ty * 16u + tx;
+    let m0 = wg.y * TM;
+    let n0 = wg.x * TN;
 
-    var acc: f32 = 0.0;
+    var acc00: f32 = 0.0;
+    var acc01: f32 = 0.0;
+    var acc10: f32 = 0.0;
+    var acc11: f32 = 0.0;
+
     var kb: u32 = 0u;
     loop {
         if (kb >= dims.k) {
             break;
         }
-        let ka = kb + tx;
-        a_tile[ty][tx] = select(0.0, x[m * dims.k + ka], m < dims.m && ka < dims.k);
-        let bn = n0 + ty;
-        let bk = kb + tx;
-        let b_valid = bn < dims.n && bk < dims.k;
-        let safe_bn = select(0u, bn, b_valid);
-        let safe_bk = select(0u, bk, b_valid);
-        b_tile[ty][tx] = select(0.0, dequant_q4(safe_bn, safe_bk), b_valid);
-        workgroupBarrier();
-
-        for (var kk: u32 = 0u; kk < TILE; kk = kk + 1u) {
-            acc = acc + a_tile[ty][kk] * b_tile[tx][kk];
+        for (var i: u32 = 0u; i < 2u; i = i + 1u) {
+            let idx = tid + i * THREADS;
+            let mm = idx / TK;
+            let kk = idx % TK;
+            let m = m0 + mm;
+            let ka = kb + kk;
+            a_tile[mm][kk] = select(0.0, x[m * dims.k + ka], m < dims.m && ka < dims.k);
+        }
+        for (var i: u32 = 0u; i < 2u; i = i + 1u) {
+            let idx = tid + i * THREADS;
+            let nn = idx / TK;
+            let kk = idx % TK;
+            let n = n0 + nn;
+            let bk = kb + kk;
+            let valid = n < dims.n && bk < dims.k;
+            let safe_n = select(0u, n, valid);
+            let safe_bk = select(0u, bk, valid);
+            b_tile[nn][kk] = select(0.0, dequant_q4(safe_n, safe_bk), valid);
         }
         workgroupBarrier();
-        kb = kb + TILE;
+
+        for (var kk: u32 = 0u; kk < TK; kk = kk + 1u) {
+            let a0 = a_tile[ty][kk];
+            let a1 = a_tile[ty + 16u][kk];
+            let b0 = b_tile[tx][kk];
+            let b1 = b_tile[tx + 16u][kk];
+            acc00 = acc00 + a0 * b0;
+            acc01 = acc01 + a0 * b1;
+            acc10 = acc10 + a1 * b0;
+            acc11 = acc11 + a1 * b1;
+        }
+        workgroupBarrier();
+        kb = kb + TK;
     }
 
-    if (m < dims.m && n < dims.n) {
-        acc = acc + b[n];
-        if (dims.act == 1u) {
-            acc = max(acc, 0.0);
-        }
-        out[m * dims.n + n] = acc;
+    let m0_ = m0 + ty;
+    let m1_ = m0 + ty + 16u;
+    let n0_ = n0 + tx;
+    let n1_ = n0 + tx + 16u;
+    let relu = dims.act == 1u;
+
+    if (m0_ < dims.m && n0_ < dims.n) {
+        var v = acc00 + b[n0_];
+        if (relu) { v = max(v, 0.0); }
+        out[m0_ * dims.n + n0_] = v;
+    }
+    if (m0_ < dims.m && n1_ < dims.n) {
+        var v = acc01 + b[n1_];
+        if (relu) { v = max(v, 0.0); }
+        out[m0_ * dims.n + n1_] = v;
+    }
+    if (m1_ < dims.m && n0_ < dims.n) {
+        var v = acc10 + b[n0_];
+        if (relu) { v = max(v, 0.0); }
+        out[m1_ * dims.n + n0_] = v;
+    }
+    if (m1_ < dims.m && n1_ < dims.n) {
+        var v = acc11 + b[n1_];
+        if (relu) { v = max(v, 0.0); }
+        out[m1_ * dims.n + n1_] = v;
     }
 }

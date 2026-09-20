@@ -406,17 +406,24 @@ fn linear(
 ) -> wgpu::Buffer {
     let pool = &engine.pool;
     let out = pool.data(&format!("{key}.out"), (rows * out_dim) as usize);
-    let wgs = (out_dim.div_ceil(16), rows.div_ceil(16), 1);
+    // Naive kernels are one thread per output element on a 16x16 workgroup
+    // (div_ceil(16) each axis); the tiled f32/Q8_0 kernels use 2x2 register
+    // blocking, one workgroup (still 16x16=256 threads) covering a 32x32
+    // output block (div_ceil(32) each axis) -- see linear_tiled.wgsl.
+    let wgs_naive = (out_dim.div_ceil(16), rows.div_ceil(16), 1);
+    let wgs_tiled32 = (out_dim.div_ceil(32), rows.div_ceil(32), 1);
     match w {
         MatMulWeight::F32 { w } => {
             // Naive is one thread per output element with zero reuse across
             // rows -- fine at M=1 (single-forecast decode), wasteful once M
             // grows (batching): the tiled kernel amortizes both x and w
-            // reads across a 16x16 block instead of re-reading them per
-            // thread. See docs/runs/2026-09-20-perf.md's Phase C tiled-GEMM
-            // entry for the native/browser batch-24 numbers this threshold
-            // is based on.
-            let pipeline = if rows >= TILED_THRESHOLD_ROWS { &engine.linear_tiled } else { &engine.linear };
+            // reads across a 32x32 block (2x2 register-blocked) instead of
+            // re-reading them per thread. See docs/runs/2026-09-20-perf.md's
+            // Phase C tiled-GEMM entry for the native/browser batch-24
+            // numbers this threshold is based on.
+            let tiled = rows >= TILED_THRESHOLD_ROWS;
+            let pipeline = if tiled { &engine.linear_tiled } else { &engine.linear };
+            let wgs = if tiled { wgs_tiled32 } else { wgs_naive };
             let dims = pool.uniform(&format!("{key}.dims"), LinearDims { m: rows, k: in_dim, n: out_dim, act });
             let bg = pool.bind_group(
                 key,
@@ -432,21 +439,23 @@ fn linear(
             engine.dispatch(encoder, pipeline, &bg, wgs, key);
         }
         MatMulWeight::Q8_0 { qs, scales, blocks_per_row } | MatMulWeight::Q4_0 { qs, scales, blocks_per_row } => {
-            // Q4_0's dequant is cheap enough that the naive kernel is
-            // already memory-light; measured, the tiled kernel's
-            // shared-memory/barrier overhead costs more than its
-            // dequant-once-per-tile saves for this weight format (batch-24
-            // native: 36.2ms/signal naive vs 41.8ms/signal tiled -- see
-            // docs/runs/2026-09-20-perf.md). Q8_0 and F32 both win from
-            // tiling (59.5->41.8ms, 71.3->41.2ms respectively), so only
-            // Q4_0 is excluded here.
-            let tiled = rows >= TILED_THRESHOLD_ROWS && matches!(w, MatMulWeight::Q8_0 { .. });
+            // With the earlier 16x16/1-output-per-thread tiled kernel,
+            // Q4_0's cheap dequant meant the naive kernel already won
+            // (batch-24 native: 36.2ms/signal naive vs 41.8ms/signal
+            // tiled). After adding 2x2 register blocking (each thread
+            // reuses its dequantized b_tile registers across 2 output
+            // columns instead of 1), Q4_0 tiled now wins too (34.5 ->
+            // 22.2ms/signal, see docs/runs/2026-09-20-perf.md) -- so all
+            // three weight residencies route through the tiled kernel once
+            // `rows >= TILED_THRESHOLD_ROWS`.
+            let tiled = rows >= TILED_THRESHOLD_ROWS;
             let pipeline = match (matches!(w, MatMulWeight::Q8_0 { .. }), tiled) {
                 (true, true) => &engine.linear_tiled_q8,
                 (true, false) => &engine.linear_q8,
                 (false, true) => &engine.linear_tiled_q4,
                 (false, false) => &engine.linear_q4,
             };
+            let wgs = if tiled { wgs_tiled32 } else { wgs_naive };
             let dims = pool.uniform(
                 &format!("{key}.dims"),
                 LinearQDims { m: rows, k: in_dim, n: out_dim, act, blocks_per_row: *blocks_per_row, _p0: 0, _p1: 0, _p2: 0 },
