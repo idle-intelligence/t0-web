@@ -67,6 +67,7 @@ pub fn swiglu_ffn<B: Backend>(
 /// "interleaved" convention from the `rotary_embedding_torch` dependency —
 /// *not* the split-half convention some other decoders use), `theta=10000`,
 /// `use_xpos=True`, `xpos_scale_base=512` (library default, unoverridden).
+#[derive(Clone)]
 pub struct RopeTables<B: Backend> {
     pub cos: Tensor<B, 2>,   // [seq, head_dim]
     pub sin: Tensor<B, 2>,   // [seq, head_dim]
