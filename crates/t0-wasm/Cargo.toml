@@ -10,11 +10,17 @@ crate-type = ["cdylib", "rlib"]
 [features]
 default = ["ndarray"]
 ndarray = ["burn-ndarray"]
-# WebGPU backend for t0-wasm is not wired up yet — see README.md.
 wgpu = ["burn-wgpu"]
+# t0-fast path: no Burn at inference (see crates/t0-fast). Build with
+# `--no-default-features --features fast` -- mutually exclusive with
+# ndarray/wgpu in practice (both `T0Wasm` impls are cfg'd out when the
+# other is selected), same one-feature-per-wasm-pack-build convention as
+# ndarray/wgpu.
+fast = ["dep:t0-fast"]
 
 [dependencies]
 t0-core = { path = "../t0-core" }
+t0-fast = { path = "../t0-fast", optional = true, features = ["wasm"] }
 anyhow = { workspace = true }
 burn = { workspace = true }
 burn-ndarray = { workspace = true, optional = true }
