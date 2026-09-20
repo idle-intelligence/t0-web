@@ -171,6 +171,32 @@
             color: var(--bg);
             border-color: var(--text);
         }
+        .model-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 8px;
+        }
+        .model-btn {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 13px;
+            font-weight: 500;
+            height: 37px;
+            padding: 0 4px;
+            cursor: pointer;
+            border: 1px solid var(--border);
+            background: transparent;
+            color: var(--text);
+            border-radius: 0;
+            text-align: center;
+            transition: border-color 0.15s, background 0.15s, color 0.15s;
+        }
+        .model-btn:hover:not(:disabled) { border-color: var(--text); }
+        .model-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+        .model-btn.active {
+            background: var(--text);
+            color: var(--bg);
+            border-color: var(--text);
+        }
         .legend {
             display: flex;
             justify-content: space-between;
@@ -242,14 +268,18 @@
         <p class="org">idle intelligence</p>
         <h1>t0-web</h1>
         <p class="tagline">
-            <a href="https://huggingface.co/theforecastingcompany/t0-alpha">t0-alpha</a>,
-            quantized to 8 bit (~109 MB), forecasting one series in your browser;
-            WebGPU when available, otherwise CPU
+            t0-alpha and t0-beta, quantized to 4 or 8 bit, forecasting one
+            series in your browser; WebGPU when available, otherwise CPU
         </p>
         <p class="repo">
             <a href="https://github.com/idle-intelligence/t0-web">github.com/idle-intelligence/t0-web</a>
         </p>
     </header>
+
+    <section>
+        <h2>MODEL</h2>
+        <div class="model-grid" id="modelGrid"></div>
+    </section>
 
     <section>
         <h2>STATUS</h2>
@@ -307,8 +337,11 @@
 
     <footer>
         <p class="credit">
-            Model: <a href="https://huggingface.co/theforecastingcompany/t0-alpha">t0-alpha</a>
-            by <a href="https://www.theforecastingcompany.ai">The Forecasting Company</a>, Apache-2.0.
+            Weights: <a href="https://huggingface.co/idle-intelligence/t0-alpha-q8_0-webgpu">alpha Q8_0</a> ·
+            <a href="https://huggingface.co/idle-intelligence/t0-alpha-q4_0-webgpu">alpha Q4_0</a> ·
+            <a href="https://huggingface.co/idle-intelligence/t0-beta-q8_0-webgpu">beta Q8_0</a> ·
+            <a href="https://huggingface.co/idle-intelligence/t0-beta-q4_0-webgpu">beta Q4_0</a>.
+            t0-alpha and t0-beta are by <a href="https://huggingface.co/theforecastingcompany">The Forecasting Company</a> (Apache-2.0).
             Custom Rust inference compiled to WebAssembly.
         </p>
         <p class="credit">Data: US daily births, 1969–1988 (<a href="./data/README.md">source + license</a>).</p>
@@ -412,6 +445,15 @@
                 let h = 0;
                 for (let i = INPUT_WINDOW.start; i <= INPUT_WINDOW.end; i++) h = (h * 31 + series[i]) % 1000000007;
                 return h;
+            },
+            models() {
+                return Array.from(modelGrid.children).map((b) => ({ key: b.dataset.key, label: b.textContent, active: b.classList.contains('active') }));
+            },
+            currentModel() {
+                return currentModelKey;
+            },
+            selectModel(key) {
+                selectModel(key);
             },
         };
 
@@ -742,9 +784,55 @@
         }
         loadSeriesIndex();
 
+        // ---- model row: four family-style buttons, one MODELS table lives
+        // in worker.js -- this just renders whatever list it announces.
+        const modelGrid = document.getElementById('modelGrid');
+        let currentModelKey = null;
+        let modelSwitching = false;
+
+        function setModelButtonsEnabled(activeKey) {
+            for (const btn of modelGrid.children) {
+                btn.disabled = btn.dataset.key === activeKey;
+                btn.classList.toggle('active', btn.dataset.key === activeKey);
+            }
+        }
+
+        function renderModelButtons(list, defaultKey) {
+            modelGrid.innerHTML = '';
+            currentModelKey = defaultKey;
+            for (const { key, label } of list) {
+                const btn = document.createElement('button');
+                btn.className = 'model-btn';
+                btn.type = 'button';
+                btn.textContent = label;
+                btn.dataset.key = key;
+                btn.disabled = true; // enabled once the current model is ready
+                btn.addEventListener('click', () => selectModel(key));
+                modelGrid.appendChild(btn);
+            }
+            setModelButtonsEnabled(defaultKey);
+        }
+
+        function selectModel(key) {
+            if (modelSwitching || forecasting || key === currentModelKey) return;
+            modelSwitching = true;
+            window.__app.ready = false;
+            forecastBtn.disabled = true;
+            lastForecast = null;
+            window.__app.lastForecast = null;
+            metricsCard.style.display = 'none';
+            for (const btn of modelGrid.children) btn.disabled = true;
+            setDot('loading');
+            setStatus('Loading...');
+            worker.postMessage({ type: 'load', modelKey: key });
+        }
+
         worker.onmessage = (e) => {
             const msg = e.data;
             switch (msg.type) {
+                case 'models':
+                    renderModelButtons(msg.list, msg.defaultKey);
+                    break;
                 case 'status':
                     setDot('loading');
                     setStatus(msg.text);
@@ -763,6 +851,9 @@
                     setDot('ready');
                     setStatus(`model loaded, ${formatBackend(msg.backend)}`);
                     window.__app.ready = true;
+                    modelSwitching = false;
+                    currentModelKey = msg.modelKey;
+                    setModelButtonsEnabled(currentModelKey);
                     forecastBtn.disabled = false;
                     drawAll();
                     runForecast();
@@ -784,6 +875,8 @@
                 case 'error':
                     forecasting = false;
                     forecastBtn.disabled = false;
+                    modelSwitching = false;
+                    setModelButtonsEnabled(currentModelKey);
                     setDot('error');
                     setStatus('Error: ' + msg.message);
                     console.error(msg.message);
