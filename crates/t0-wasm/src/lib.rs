@@ -90,4 +90,22 @@ impl T0Wasm {
         let (out, _) = t0_core::forecast_async(&self.model, &context, 1, t_ctx, horizon, &device, false).await;
         out
     }
+
+    /// `n_signals` independent forecasts in one call, each over the same
+    /// `context` (used for batch-latency benchmarking, see
+    /// `bench/ours/index.html`), internally chunked at `chunk_size` (0 means
+    /// "no chunking") the same way `t0-cli bench --chunk` is on native — see
+    /// `t0_core::forecast_batch_chunked_async`'s doc comment for why the
+    /// chunk cap exists on `wgpu`. Returns `n_signals * horizon * n_quantiles`
+    /// values, signal-major then time-major then quantile-minor.
+    #[wasm_bindgen(js_name = forecastBatch)]
+    pub async fn forecast_batch(&self, context: Vec<f32>, n_signals: usize, horizon: usize, chunk_size: usize) -> Vec<f32> {
+        let device = Default::default();
+        let t_ctx = context.len();
+        let mut contexts = Vec::with_capacity(n_signals * t_ctx);
+        for _ in 0..n_signals {
+            contexts.extend_from_slice(&context);
+        }
+        t0_core::forecast_batch_chunked_async(&self.model, &contexts, n_signals, t_ctx, horizon, &device, chunk_size).await
+    }
 }

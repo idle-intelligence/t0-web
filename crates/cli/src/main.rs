@@ -185,6 +185,40 @@ fn cmd_gifteval(manifest_dir: &Path, weights: &Path, config: Option<&Path>, out_
     Ok(())
 }
 
+/// Forecasts one window sliced directly out of a raw little-endian f32
+/// series file (e.g. `web/data/series.f32`) and writes the raw
+/// `horizon * n_quantiles` output to `out` (same layout as `gifteval`'s
+/// per-window output). Exists to produce an F32 reference for comparing
+/// against a third-party export (e.g. the official ONNX INT8 build) on the
+/// exact same context/horizon window this repo's own demo page uses — see
+/// `docs/runs/2026-09-20-head-to-head.md`.
+fn cmd_forecast_raw(
+    weights_path: &Path,
+    config_path: Option<&Path>,
+    series_path: &Path,
+    origin: usize,
+    t_ctx: usize,
+    horizon: usize,
+    out: &Path,
+) -> Result<()> {
+    let series = read_f32(series_path)?;
+    let ctx_start = origin.saturating_sub(t_ctx);
+    let context = &series[ctx_start..origin];
+    let (model, load_time) = load_model(weights_path, config_path)?;
+    let (q, _) = forecast(&model, context, 1, context.len(), horizon, &device(), false);
+    let bytes: Vec<u8> = q.iter().flat_map(|v| v.to_le_bytes()).collect();
+    std::fs::write(out, &bytes)?;
+    println!(
+        "loaded in {:.3}s, context_len={}, wrote {} values ({} bytes) to {}",
+        load_time.as_secs_f64(),
+        context.len(),
+        q.len(),
+        bytes.len(),
+        out.display()
+    );
+    Ok(())
+}
+
 fn cmd_export_gguf(weights_path: &Path, config_path: &Path, quant: &str, out: &Path) -> Result<()> {
     let quant = Quant::parse(quant)?;
     let config: t0_core::T0Config = serde_json::from_str(&std::fs::read_to_string(config_path)?)?;
@@ -385,6 +419,8 @@ fn main() -> Result<()> {
     let mut seed = 0u64;
     let mut manifest_dir = PathBuf::from("fixtures/gifteval");
     let mut gift_out = PathBuf::from("fixtures/gifteval/forecasts");
+    let mut series_file: Option<PathBuf> = None;
+    let mut origin = 0usize;
     let cmd = args.get(1).cloned().unwrap_or_default();
 
     let mut i = 2;
@@ -462,6 +498,14 @@ fn main() -> Result<()> {
                 gift_out = PathBuf::from(&args[i + 1]);
                 i += 2;
             }
+            "--series-file" => {
+                series_file = Some(PathBuf::from(&args[i + 1]));
+                i += 2;
+            }
+            "--origin" => {
+                origin = args[i + 1].parse()?;
+                i += 2;
+            }
             other => return Err(anyhow!("unknown argument: {other}")),
         }
     }
@@ -481,6 +525,11 @@ fn main() -> Result<()> {
             cmd_bench(&weights, config.as_deref(), n_signals, t_ctx, horizon, reps, chunk, warmup)
         }
         "gifteval" => cmd_gifteval(&manifest_dir, &weights, config.as_deref(), &gift_out),
+        "forecast-raw" => {
+            check_backend_flag(&backend)?;
+            let series_file = series_file.ok_or_else(|| anyhow!("--series-file is required"))?;
+            cmd_forecast_raw(&weights, config.as_deref(), &series_file, origin, t_ctx, horizon, &out)
+        }
         "drift" => {
             let weights_f32 = weights_f32.ok_or_else(|| anyhow!("--weights-f32 is required"))?;
             let config = config.ok_or_else(|| anyhow!("--config is required"))?;
