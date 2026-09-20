@@ -380,6 +380,34 @@ pub fn forecast_batch_chunked<B: Backend>(
     out
 }
 
+/// Same as `forecast_batch_chunked`, but via `forecast_series_async`
+/// (`into_data_async().await` readback) — the one safe to call from
+/// `t0-wasm`'s `wgpu` feature in a browser, same reasoning as
+/// `forecast_async` above.
+pub async fn forecast_batch_chunked_async<B: Backend>(
+    model: &T0Model<B>,
+    contexts: &[f32],
+    n_signals: usize,
+    t_ctx: usize,
+    horizon: usize,
+    device: &B::Device,
+    chunk_size: usize,
+) -> Vec<f32> {
+    let chunk_size = if chunk_size == 0 { n_signals } else { chunk_size.min(n_signals) };
+    let n_q = model.config.n_quantiles();
+    let mut out = vec![0.0f32; n_signals * horizon * n_q];
+    let mut start = 0;
+    while start < n_signals {
+        let n = chunk_size.min(n_signals - start);
+        let chunk_ctx = &contexts[start * t_ctx..(start + n) * t_ctx];
+        let raw = TimeSeries::from_context_batch(chunk_ctx, n, t_ctx, horizon);
+        let (chunk_out, _) = forecast_series_async(model, raw, t_ctx, horizon, device, false).await;
+        out[start * horizon * n_q..(start + n) * horizon * n_q].copy_from_slice(&chunk_out);
+        start += n;
+    }
+    out
+}
+
 /// Shared pre-`model.forward`/`forward_async` setup for `forecast_series`
 /// and `forecast_series_async`: patch-align padding + causal scaling.
 /// Returns the scaled+padded window, the scaler's loc/scale (for
