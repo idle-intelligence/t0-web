@@ -308,15 +308,27 @@ the 97 configs — the exact formula in `SalesforceAIResearch/gift-eval`
 baseline from that repo's `results/seasonal_naive/all_results.csv`, copied
 into this repo at `results/seasonal_naive/all_results.csv`; tool:
 `tools/score_official_protocol.py --results-csv ... --normalize-by ...`,
-0/97 unmatched configs): **Q4_0 normalized MASE 0.7334, CRPS 0.4973** — this
-is the number directly comparable to the model card's F32 numbers (CRPS
-0.4941, MASE 0.7240, `theforecastingcompany/t0-alpha` `README.md` lines
-319-320): +1.3% MASE, +0.6% CRPS, consistent with a small expected Q4_0
-lossy-quantization gap rather than a protocol mismatch. F32 control:
-pending (full-97 F32 run on the box was still in progress as of the prior
-session's write-up); rerun the same command against
-`results/full97/f32/all_results.csv` once it lands. Full per-config
-normalized table and the 8-config-subset non-availability note:
+0/97 unmatched configs both runs).
+
+**Release gate table** (normalized MASE / CRPS):
+
+| variant | normalized MASE | normalized CRPS | vs published card |
+|---|---|---|---|
+| Published card (t0-alpha, F32) | 0.7240 | 0.4941 | — (`theforecastingcompany/t0-alpha` `README.md` lines 319-320) |
+| Our F32 (full-97, box) | 0.7255 | 0.4942 | +0.2% MASE, +0.02% CRPS |
+| Our Q8_0 (full-97) | not available | not available | full-97 Q8_0 was never run on the box; only a non-normalizable 8-config-subset aggregate exists |
+| Our Q4_0 (full-97, box) | 0.7334 | 0.4973 | +1.3% MASE, +0.6% CRPS |
+
+**Gate 1 (pipeline fidelity): our F32 reproduces the card** to within
++0.2%/+0.02%, not a pipeline divergence. **Gate 2 (quantization cost in
+isolation, ours vs ours): Q4_0 vs our own F32** is +1.09% MASE, +0.63%
+CRPS relative — the number that isolates quantization from any
+card/pipeline effect. Per-config check: the ten configs where Q4_0 moves
+furthest from our F32 (up to +12.2% MASE, on `bitbrains_fast_storage`,
+`bitbrains_rnd`, `m4_hourly`) are small-magnitude/noisy series, consistent
+with ordinary quantization sensitivity rather than a pipeline bug; no
+config shows F32 itself behaving anomalously. Full per-config F32+Q4_0
+table, the gate reasoning, and the 8-config-subset non-availability note:
 `docs/runs/2026-09-20-official-protocol-full97-normalized.md`.
 
 Footnote — this repo's own 512-context-capped GIFT-Eval subset (not the official 8192-context protocol; `docs/runs/2026-09-19-gifteval-subset.md`, extended this session with `t0-cli gifteval --backend fast`): reference F32 0.0897/1.2139, our (Burn) F32 0.0897/1.2139, our (Burn) Q8_0 0.0897/1.2139, our (Burn) Q4_0 0.0898/1.2157, **our t0-fast Q8_0-resident 0.0897/1.2139 (bit-for-bit aggregate match to Burn's Q8_0 row, every per-task value identical)**, **our t0-fast Q4_0-resident 0.0898/1.2157 (same exact match to Burn's Q4_0 row)**.
