@@ -1,6 +1,6 @@
 //! `t0-cli`: native driver for `t0-core`. Backend is picked by Cargo
 //! feature (`ndarray` default, `wgpu` optional) — never inside the library
-//! crate, per this repo's CLAUDE.md. `--backend` is asserted against the
+//! crate, by convention. `--backend` is asserted against the
 //! compiled feature (not a runtime switch: two different `Backend` types
 //! can't coexist in one binary without dynamic dispatch, and RAM is tight
 //! enough here that we build one backend at a time anyway).

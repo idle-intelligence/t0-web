@@ -3,7 +3,7 @@
 instrument (`web/data/series.f32`).
 
 Not a real dataset (avoids the "weights/datasets never committed" question
-entirely — see CLAUDE.md) and not one of `fixtures/*_context.f32` either,
+entirely) and not one of `fixtures/*_context.f32` either,
 because those stop at t=512 with no true continuation to compare a forecast
 against. This is a deterministic synthetic daily-like series (no RNG, so
 it's exactly reproducible from this script alone): a slow seasonal sine, a

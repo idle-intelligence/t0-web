@@ -1,5 +1,5 @@
 // Headless smoke test for web/index.html: loads the page in Playwright's
-// bundled Chromium (never a personal browser -- CLAUDE.md).
+// bundled Chromium (never a personal browser).
 //
 // The plotted history (US births, July-November 1988) never changes; only
 // the origin (where the forecast starts) is draggable within it, drawn on
