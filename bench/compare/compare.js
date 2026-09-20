@@ -388,11 +388,6 @@ function drawOverlayChart(theirsBands, oursBands, horizon) {
     drawMedian(oursBands, '#2d7d46', true);
 }
 
-function renderPerformance(gpuInfo) {
-    document.getElementById('perfUA').textContent = navigator.userAgent;
-    document.getElementById('perfGPU').textContent = 'GPU adapter: ' + gpuInfo;
-    document.getElementById('perfTime').textContent = new Date().toISOString();
-}
 
 async function gpuAdapterName() {
     if (!navigator.gpu) return 'navigator.gpu unavailable (WebGPU requires HTTPS or a supporting browser)';
@@ -542,7 +537,6 @@ async function run(overrideConfig) {
         drawOverlayChart(theirsBands, oursBands, cfg.horizon);
 
         const gpuInfo = await gpuAdapterName();
-        renderPerformance(gpuInfo);
 
         setStatus('ready', `done: context=${cfg.context} horizon=${cfg.horizon} quant=${cfg.quant}`);
 
