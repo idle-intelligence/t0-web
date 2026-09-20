@@ -1,0 +1,24 @@
+{
+  "reference": "tfc-t0 (PyPI) t0.model.model.T0Forecaster, theforecastingcompany/t0-alpha, RolloutManager autoregressive path (t0/model/rollout.py)",
+  "patch_size": 32,
+  "quantile_levels": [
+    0.1,
+    0.25,
+    0.5,
+    0.75,
+    0.9
+  ],
+  "cases": [
+    {
+      "name": "case_long_rollout",
+      "v": 1,
+      "n_patches": 134,
+      "context_len": 4096,
+      "horizon": 1200,
+      "context_file": "case_long_rollout_context.f32",
+      "quantiles_file": "case_long_rollout_quantiles.f32",
+      "patch_embedding_file": "case_long_rollout_patch_embedding.f32",
+      "layer0_output_file": "case_long_rollout_layer0_output.f32"
+    }
+  ]
+}
