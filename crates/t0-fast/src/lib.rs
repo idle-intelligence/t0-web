@@ -11,6 +11,7 @@
 pub mod engine;
 pub mod model;
 pub mod pool;
+pub mod quant;
 mod rope_tables;
 
 use anyhow::Result;
@@ -20,9 +21,10 @@ use t0_core::{T0Config, Weights};
 
 pub use engine::Engine;
 pub use model::GpuModel;
+pub use quant::WeightQuant;
 
-pub fn load_model(engine: &Engine, weights: &Weights, config: T0Config) -> Result<GpuModel> {
-    GpuModel::load(engine, weights, config)
+pub fn load_model(engine: &Engine, weights: &Weights, config: T0Config, quant: WeightQuant) -> Result<GpuModel> {
+    GpuModel::load(engine, weights, config, quant)
 }
 
 /// Mirrors `t0_core::model::forecast_series{,_prepare,_finish}` exactly
