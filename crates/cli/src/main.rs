@@ -392,6 +392,54 @@ fn quantizable_f32_bytes(weights: &Weights, config: &T0Config) -> Result<u64> {
     Ok(total)
 }
 
+/// Same data path as `cmd_gifteval` (same manifest, same 512-context-cap
+/// windows, same per-window forecast-and-write loop), driven by
+/// `t0_fast::forecast` instead of a Burn `T0Model`. `weights` is always a
+/// `.gguf` here (GGUF-resident loading, see `t0_fast::load_model_from_gguf`) --
+/// this only fills the *this repo's own* GIFT-Eval-subset table
+/// (`docs/BENCHMARKS.md`'s "GIFT-Eval subset" section, CPU data loading +
+/// GPU forward, 512-step context cap), not the head-to-head table's
+/// "official-protocol subset" row (their code, `CONTEXT_LENGTH=8192`) --
+/// that protocol needs autoregressive rollout past `max_horizon=1024`,
+/// which no backend in this repo implements yet (see
+/// `crates/t0-core/src/model.rs`'s doc comment).
+#[cfg(feature = "fast")]
+fn cmd_gifteval_fast(manifest_dir: &Path, weights_path: &Path, out_dir: &Path) -> Result<()> {
+    let manifest: GiftManifest = serde_json::from_str(&std::fs::read_to_string(manifest_dir.join("manifest.json"))?)?;
+    let engine = t0_fast::Engine::new()?;
+    let t0 = Instant::now();
+    let bytes = std::fs::read(weights_path)?;
+    let model = t0_fast::load_model_from_gguf(&engine, &bytes)?;
+    println!("loaded in {:.3}s", t0.elapsed().as_secs_f64());
+    std::fs::create_dir_all(out_dir)?;
+    let n_q = model.config.n_quantiles();
+
+    for task in &manifest.tasks {
+        let safe_name = task.config.replace('/', "_");
+        let mut out = Vec::with_capacity(task.windows.len() * task.horizon * n_q);
+        let t0 = Instant::now();
+        for window in &task.windows {
+            let context = read_f32(&manifest_dir.join(&window.context_file))?;
+            assert_eq!(context.len(), window.context_len);
+            let q = t0_fast::forecast(&engine, &model, &context, 1, window.context_len, task.horizon)?;
+            out.extend_from_slice(&q);
+        }
+        let elapsed = t0.elapsed().as_secs_f64();
+        let out_path = out_dir.join(format!("{safe_name}.f32"));
+        let bytes: Vec<u8> = out.iter().flat_map(|v| v.to_le_bytes()).collect();
+        std::fs::write(&out_path, &bytes)?;
+        println!(
+            "{}: {} windows forecast in {:.2}s ({:.1} ms/window) -> {}",
+            task.config,
+            task.windows.len(),
+            elapsed,
+            1000.0 * elapsed / task.windows.len().max(1) as f64,
+            out_path.display()
+        );
+    }
+    Ok(())
+}
+
 /// F32 (`fast_quant=f32`) compares against the fixtures' F32-reference
 /// quantile files, same gate as `cmd_parity`. Q8_0/Q4_0 compare against
 /// *Burn's own* Q8_0/Q4_0 path instead (per this task's brief): the F32
@@ -702,7 +750,13 @@ fn main() -> Result<()> {
             check_backend_flag(&backend)?;
             cmd_bench(&weights, config.as_deref(), n_signals, t_ctx, horizon, reps, chunk, warmup)
         }
-        "gifteval" => cmd_gifteval(&manifest_dir, &weights, config.as_deref(), &gift_out),
+        "gifteval" => {
+            #[cfg(feature = "fast")]
+            if backend == "fast" {
+                return cmd_gifteval_fast(&manifest_dir, &weights, &gift_out);
+            }
+            cmd_gifteval(&manifest_dir, &weights, config.as_deref(), &gift_out)
+        }
         "forecast-raw" => {
             check_backend_flag(&backend)?;
             let series_file = series_file.ok_or_else(|| anyhow!("--series-file is required"))?;
