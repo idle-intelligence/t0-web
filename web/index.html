@@ -225,7 +225,9 @@
            legend/metrics, footer credit lines. Same variables/sizes as
            the base style above. ---- */
         .model-selector {
-            flex-wrap: wrap;
+            display: grid;
+            grid-template-columns: repeat(2, max-content);
+            column-gap: 24px;
             row-gap: 8px;
         }
         #status-text {
@@ -333,10 +335,10 @@
     <section>
         <h2>settings <span class="sub">· model</span></h2>
         <div class="model-selector">
-            <label><input type="radio" name="model" value="alpha-q8"> alpha Q8_0 (109 MB)</label>
             <label><input type="radio" name="model" value="alpha-q4" checked> alpha Q4_0 (59 MB)</label>
-            <label><input type="radio" name="model" value="beta-q8"> beta Q8_0 (275 MB)</label>
+            <label><input type="radio" name="model" value="alpha-q8"> alpha Q8_0 (109 MB)</label>
             <label><input type="radio" name="model" value="beta-q4"> beta Q4_0 (149 MB)</label>
+            <label><input type="radio" name="model" value="beta-q8"> beta Q8_0 (275 MB)</label>
         </div>
     </section>
 
@@ -397,11 +399,11 @@
     <footer>
         <a href="https://idleintelligence.org">idleintelligence.org</a>
         <p class="credit">
-            Weights: <a href="https://huggingface.co/idle-intelligence/t0-alpha-q8_0-webgpu">alpha Q8_0</a> ·
-            <a href="https://huggingface.co/idle-intelligence/t0-alpha-q4_0-webgpu">alpha Q4_0</a> ·
-            <a href="https://huggingface.co/idle-intelligence/t0-beta-q8_0-webgpu">beta Q8_0</a> ·
-            <a href="https://huggingface.co/idle-intelligence/t0-beta-q4_0-webgpu">beta Q4_0</a>.
-            t0-alpha and t0-beta are by <a href="https://huggingface.co/theforecastingcompany">The Forecasting Company</a> (Apache-2.0).
+            Weights: <a href="https://huggingface.co/idle-intelligence/t0-alpha-q4_0-webgpu">alpha Q4_0</a> ·
+            <a href="https://huggingface.co/idle-intelligence/t0-alpha-q8_0-webgpu">alpha Q8_0</a> ·
+            <a href="https://huggingface.co/idle-intelligence/t0-beta-q4_0-webgpu">beta Q4_0</a> ·
+            <a href="https://huggingface.co/idle-intelligence/t0-beta-q8_0-webgpu">beta Q8_0</a>.<br>
+            t0-alpha and t0-beta are by <a href="https://huggingface.co/theforecastingcompany">The Forecasting Company</a> (Apache-2.0).<br>
             Custom Rust inference compiled to WebAssembly.
         </p>
         <p class="credit">Data: US daily births, 1969–1988 (<a href="./data/README.md">source + license</a>).</p>
