@@ -52,6 +52,17 @@ pub struct T0Model<B: Backend> {
     layers: Vec<LayerWeights<B>>,
     out_norm_scale: Tensor<B, 1>,
     decoder: ResidualBlockWeights<B>,
+    // RoPE tables are a pure function of (patch count `p`, head_dim) -- not
+    // of any per-call series data -- so they're safe to cache across
+    // `forward_tensor` calls keyed by `p`. Repeated forecasts at a fixed
+    // context/horizon (the common case: one model, one series length,
+    // called in a loop) hit this every time after the first, skipping 3
+    // `Tensor::from_floats` GPU buffer writes/forecast (`ops.rs`'s
+    // `RopeTables::new`) -- each buffer write forces cubecl-wgpu's stream to
+    // flush before it (`ScheduleTask::Write` in cubecl-wgpu's `stream.rs`),
+    // so this also cuts 3 of the ~7 per-forecast forced command-buffer
+    // flushes on the wgpu backend (see `docs/runs/2026-09-20-perf.md`).
+    rope_cache: std::cell::RefCell<Option<(usize, RopeTables<B>)>>,
 }
 
 /// Intermediate activations for parity debugging (`docs/reports/t0-alpha.md`
@@ -122,6 +133,7 @@ impl<B: Backend> T0Model<B> {
             layers,
             out_norm_scale,
             decoder,
+            rope_cache: std::cell::RefCell::new(None),
         })
     }
 
@@ -191,7 +203,13 @@ impl<B: Backend> T0Model<B> {
         let time_mask: Tensor<B, 4> = Tensor::<B, 1>::from_floats(time_mask_flat.as_slice(), device).reshape([v, 1, p, p]);
         let group_mask_flat = build_group_mask(&patched_group_ids, v, p);
         let group_mask: Tensor<B, 4> = Tensor::<B, 1>::from_floats(group_mask_flat.as_slice(), device).reshape([p, 1, v, v]);
-        let rope = RopeTables::<B>::new(p, cfg.head_dim(), device);
+        let rope = {
+            let mut cache = self.rope_cache.borrow_mut();
+            if !matches!(&*cache, Some((cached_p, _)) if *cached_p == p) {
+                *cache = Some((p, RopeTables::<B>::new(p, cfg.head_dim(), device)));
+            }
+            cache.as_ref().expect("just populated above").1.clone()
+        };
 
         let mut layer0_output_trace = None;
         for (i, layer) in self.layers.iter().enumerate() {
