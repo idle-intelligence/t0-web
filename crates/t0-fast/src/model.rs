@@ -425,8 +425,20 @@ fn linear(
             let pipeline = if tiled { &engine.linear_tiled } else { &engine.linear };
             let wgs = if tiled { wgs_tiled32 } else { wgs_naive };
             let dims = pool.uniform(&format!("{key}.dims"), LinearDims { m: rows, k: in_dim, n: out_dim, act });
+            // Bind-group cache key must include `tiled`: naive/tiled are
+            // different pipelines with distinct auto-derived (`layout:
+            // None`) bind-group layouts, even though their WGSL bindings
+            // look identical -- reusing a bind group built against one
+            // pipeline's layout on the other's pass invalidates the
+            // command encoder (surfaces as "Encoder is invalid" at
+            // `finish()`, not at the bad `set_bind_group` call). Calls
+            // whose `rows` varies across invocations at the same call site
+            // (e.g. `gifteval`'s differently-sized windows through one
+            // resident model) cross `TILED_THRESHOLD_ROWS` in both
+            // directions, so the plain `key` alone aliased two pipelines.
+            let bg_key = format!("{key}.{}", if tiled { "tiled" } else { "naive" });
             let bg = pool.bind_group(
-                key,
+                &bg_key,
                 pipeline,
                 &[
                     BindGroupEntry { binding: 0, resource: x.as_entire_binding() },
@@ -460,8 +472,10 @@ fn linear(
                 &format!("{key}.dims"),
                 LinearQDims { m: rows, k: in_dim, n: out_dim, act, blocks_per_row: *blocks_per_row, _p0: 0, _p1: 0, _p2: 0 },
             );
+            // See the F32 branch above: bind-group cache key must include `tiled`.
+            let bg_key = format!("{key}.{}", if tiled { "tiled" } else { "naive" });
             let bg = pool.bind_group(
-                key,
+                &bg_key,
                 pipeline,
                 &[
                     BindGroupEntry { binding: 0, resource: x.as_entire_binding() },
