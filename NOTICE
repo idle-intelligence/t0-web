@@ -1,0 +1,78 @@
+t0-web
+Copyright the t0-web contributors
+
+This product is licensed under the Apache License, Version 2.0 (see
+LICENSE). It builds on the following third-party work.
+
+## The Forecasting Company — t0-alpha / t0-beta
+
+This repo is a from-scratch Rust/Burn/wgpu port of The Forecasting
+Company's t0-alpha and t0-beta time-series forecasting models.
+
+- Reference weights and code: https://huggingface.co/theforecastingcompany/t0-alpha
+  and https://huggingface.co/theforecastingcompany/t0-beta
+- Reference PyTorch implementation: `tfc-t0` on PyPI
+  (https://pypi.org/project/tfc-t0/)
+- License: Apache License, Version 2.0
+
+No original code from `tfc-t0` is copied into this repo; the port is a
+from-scratch reimplementation against the published architecture and the
+reference model's numerical behavior (see `docs/reports/t0-alpha.md`).
+
+## gluonts
+
+`tools/score_gifteval.py` and `tools/score_official_protocol.py` compute
+accuracy metrics (MASE, weighted quantile loss) using gluonts's evaluation
+functions (`gluonts.ev`, `gluonts.model.evaluate_model`).
+
+- Project: https://github.com/awslabs/gluonts
+- License: Apache License, Version 2.0
+
+## GIFT-Eval
+
+The accuracy benchmark protocol, task configs, and dataset windowing used
+by the GIFT-Eval scoring tools (`tools/gifteval_subset.py`,
+`tools/gifteval_official_export.py`, `fixtures/gifteval/`) come from the
+GIFT-Eval benchmark.
+
+- Project: https://github.com/SalesforceAIResearch/gift-eval
+- License: Apache License, Version 2.0
+- The underlying per-dataset time series (e.g. `electricity`, `solar`,
+  `jena_weather`, `saugeenday`, `LOOP_SEATTLE`, `us_births`) are drawn from
+  GIFT-Eval's own dataset collection, largely sourced from the Monash Time
+  Series Forecasting Archive (Godahewa et al. 2021,
+  https://forecastingdata.org/) and similar public research archives.
+  See GIFT-Eval's own documentation for the license of each individual
+  dataset; `web/data/README.md` in this repo documents the specific
+  provenance and license (CC BY 4.0 / public domain) of the one series
+  bundled with the browser demo (`us_births`).
+
+## Burn / cubecl
+
+The native and WASM inference backends are built on the Burn deep-learning
+framework and its cubecl GPU-kernel compiler.
+
+- Project: https://github.com/tracel-ai/burn and https://github.com/tracel-ai/cubecl
+- License: Apache License, Version 2.0 OR MIT (dual-licensed)
+
+## onnxruntime-web
+
+`bench/onnx/` and `bench/compare/` optionally load onnxruntime-web at
+runtime (via a local `ort.webgpu.min.js` + WASM build, not committed to
+this repo — see `.gitignore`) to benchmark this port against the official
+ONNX export. onnxruntime-web is not vendored or redistributed here.
+
+- Project: https://github.com/microsoft/onnxruntime
+- License: MIT
+
+## GGUF / ggml block-quantization format
+
+`crates/t0-core/src/gguf.rs` implements the GGUF v3 container format and
+the Q8_0/Q4_0 block quantization layout as documented by the ggml/llama.cpp
+project (32 values per block, f16 scale, packed int8/nibble payload). This
+is an independent Rust reimplementation from the published format and
+rounding conventions; no ggml/llama.cpp source code is copied. GGUF
+Q8_0/Q4_0 block layout compatible with ggml/llama.cpp.
+
+- Format reference: https://github.com/ggml-org/ggml and
+  https://github.com/ggml-org/llama.cpp
