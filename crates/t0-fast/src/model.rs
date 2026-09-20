@@ -628,9 +628,10 @@ fn attention(engine: &Engine, pool: &Pool, encoder: &mut wgpu::CommandEncoder, k
             _p0: 0,
         },
     );
+    let pipeline = engine.attention_pipeline(head_dim);
     let bg = pool.bind_group(
         key,
-        &engine.attention,
+        &pipeline,
         &[
             BindGroupEntry { binding: 0, resource: qkv.as_entire_binding() },
             BindGroupEntry { binding: 1, resource: mask.as_entire_binding() },
@@ -638,7 +639,7 @@ fn attention(engine: &Engine, pool: &Pool, encoder: &mut wgpu::CommandEncoder, k
             BindGroupEntry { binding: 3, resource: dims.as_entire_binding() },
         ],
     );
-    engine.dispatch(encoder, &engine.attention, &bg, (outer * heads, 1, 1), key);
+    engine.dispatch(encoder, &pipeline, &bg, (outer * heads, 1, 1), key);
     out
 }
 

@@ -1,9 +1,16 @@
 // One workgroup per (outer, head) pair; one thread per sequence position
 // (seq <= MAX_SEQ). Reads q/k/v straight out of the fused QKV buffer
-// ([outer*seq, 3*embed], row-major, head slot at head*head_dim within each
-// of the three embed-wide q/k/v segments, head_dim = dims.embed /
-// dims.heads), applies the additive mask, softmax, and writes the
-// concatenated-heads output ([outer*seq, embed]).
+// ([outer*seq, 3*embed], row-major, head slot at head*HEAD_DIM within each
+// of the three embed-wide q/k/v segments), applies the additive mask,
+// softmax, and writes the concatenated-heads output ([outer*seq, embed]).
+// HEAD_DIM is a pipeline-overridable constant (dims.embed / dims.heads,
+// set by the host at pipeline-creation time -- see engine.rs's
+// attention_pipeline cache, keyed by head_dim) rather than a uniform field,
+// so the three loops below get a compile-time bound the compiler can
+// unroll instead of a runtime one; a runtime head_dim regressed a single
+// forecast from 29ms to 164ms in browser measurement (WASM+WebGPU on
+// Apple M2 / Chrome, alpha Q4_0, context 512, horizon 32).
+override HEAD_DIM: u32;
 // Model max used to be 32 (max_horizon=1024 / patch_size=32) with 128 as
 // headroom for group-attention's seq=variate-chunk-count on a batched
 // forecast; long-context rollout (t0_core::forecast_rollout) needs whole
@@ -29,16 +36,15 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) lid:
     if (i >= dims.seq) {
         return;
     }
-    let head_dim = dims.embed / dims.heads;
 
-    let q_base = (outer * dims.seq + i) * dims.qkv_stride + head * head_dim;
+    let q_base = (outer * dims.seq + i) * dims.qkv_stride + head * HEAD_DIM;
     var scores: array<f32, MAX_SEQ>;
     let mask_base = outer * dims.mask_outer_stride + i * dims.seq;
 
     for (var j: u32 = 0u; j < dims.seq; j = j + 1u) {
-        let k_base = (outer * dims.seq + j) * dims.qkv_stride + dims.embed + head * head_dim;
+        let k_base = (outer * dims.seq + j) * dims.qkv_stride + dims.embed + head * HEAD_DIM;
         var acc: f32 = 0.0;
-        for (var d: u32 = 0u; d < head_dim; d = d + 1u) {
+        for (var d: u32 = 0u; d < HEAD_DIM; d = d + 1u) {
             acc = acc + qkv[q_base + d] * qkv[k_base + d];
         }
         scores[j] = acc * dims.scale + mask[mask_base + j];
@@ -58,11 +64,11 @@ fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) lid:
         scores[j] = scores[j] / sum;
     }
 
-    let out_base = (outer * dims.seq + i) * dims.embed + head * head_dim;
-    for (var d: u32 = 0u; d < head_dim; d = d + 1u) {
+    let out_base = (outer * dims.seq + i) * dims.embed + head * HEAD_DIM;
+    for (var d: u32 = 0u; d < HEAD_DIM; d = d + 1u) {
         var acc: f32 = 0.0;
         for (var j: u32 = 0u; j < dims.seq; j = j + 1u) {
-            let v_base = (outer * dims.seq + j) * dims.qkv_stride + 2u * dims.embed + head * head_dim;
+            let v_base = (outer * dims.seq + j) * dims.qkv_stride + 2u * dims.embed + head * HEAD_DIM;
             acc = acc + scores[j] * qkv[v_base + d];
         }
         out[out_base + d] = acc;

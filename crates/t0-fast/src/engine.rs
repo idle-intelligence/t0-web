@@ -5,6 +5,8 @@
 //! see `crates/t0-fast/README.md`.
 
 use std::borrow::Cow;
+use std::cell::RefCell;
+use std::collections::HashMap;
 use wgpu::util::DeviceExt;
 
 /// Device, queue and pipelines only -- no `Pool`. A `Pool` is per-`GpuModel`
@@ -27,7 +29,15 @@ pub struct Engine {
     pub rmsnorm_full: wgpu::ComputePipeline,
     pub rmsnorm_qk: wgpu::ComputePipeline,
     pub rope: wgpu::ComputePipeline,
-    pub attention: wgpu::ComputePipeline,
+    attention_module: wgpu::ShaderModule,
+    /// One compiled pipeline per head_dim, created lazily the first time a
+    /// model with that head_dim forwards. HEAD_DIM is a pipeline-overridable
+    /// constant in attention.wgsl (see that file's doc comment) so each
+    /// pipeline gets a compile-time loop bound the compiler can unroll,
+    /// instead of the runtime-computed head_dim that regressed a single
+    /// forecast from 29ms to 164ms in browser measurement (see
+    /// attention.wgsl's doc comment).
+    attention_pipelines: RefCell<HashMap<u32, wgpu::ComputePipeline>>,
     pub transpose_outer: wgpu::ComputePipeline,
     pub silu_mul: wgpu::ComputePipeline,
     pub quantile_head: wgpu::ComputePipeline,
@@ -82,7 +92,11 @@ impl Engine {
             rmsnorm_full: make_pipeline(&device, "rmsnorm_full", include_str!("shaders/rmsnorm_full.wgsl")),
             rmsnorm_qk: make_pipeline(&device, "rmsnorm_qk", include_str!("shaders/rmsnorm_qk.wgsl")),
             rope: make_pipeline(&device, "rope", include_str!("shaders/rope.wgsl")),
-            attention: make_pipeline(&device, "attention", include_str!("shaders/attention.wgsl")),
+            attention_module: device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("attention"),
+                source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("shaders/attention.wgsl"))),
+            }),
+            attention_pipelines: RefCell::new(HashMap::new()),
             transpose_outer: make_pipeline(&device, "transpose_outer", include_str!("shaders/transpose_outer.wgsl")),
             silu_mul: make_pipeline(&device, "silu_mul", include_str!("shaders/silu_mul.wgsl")),
             quantile_head: make_pipeline(&device, "quantile_head", include_str!("shaders/quantile_head.wgsl")),
@@ -127,6 +141,29 @@ impl Engine {
             contents: bytemuck::bytes_of(&data),
             usage: wgpu::BufferUsages::UNIFORM,
         })
+    }
+
+    /// The attention pipeline specialized for `head_dim` (see attention.wgsl's
+    /// `override HEAD_DIM` and this struct's `attention_pipelines` field).
+    /// Compiled once per distinct head_dim and cached; alpha (64) and beta
+    /// (128) each get their own pipeline off the one shared shader module.
+    pub fn attention_pipeline(&self, head_dim: u32) -> wgpu::ComputePipeline {
+        if let Some(p) = self.attention_pipelines.borrow().get(&head_dim) {
+            return p.clone();
+        }
+        let pipeline = self.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("attention"),
+            layout: None,
+            module: &self.attention_module,
+            entry_point: Some("main"),
+            compilation_options: wgpu::PipelineCompilationOptions {
+                constants: &[("HEAD_DIM", head_dim as f64)],
+                ..Default::default()
+            },
+            cache: None,
+        });
+        self.attention_pipelines.borrow_mut().insert(head_dim, pipeline.clone());
+        pipeline
     }
 
     pub fn bind_group(&self, pipeline: &wgpu::ComputePipeline, entries: &[wgpu::BindGroupEntry]) -> wgpu::BindGroup {
