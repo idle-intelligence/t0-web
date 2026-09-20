@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>t0 head-to-head: onnxruntime-web bench</title>
+<script src="./ort.webgpu.min.js"></script>
+</head>
+<body>
+<pre id="log"></pre>
+<script>
+const log = (s) => { document.getElementById('log').textContent += s + '\n'; console.log(s); };
+
+const MODEL_URL = './t0-alpha-grouped-int8.onnx';
+const SERIES_URL = './series.f32';
+const CONTEXT = 512;
+const HORIZON = 32;
+const COMPUTE_HORIZON = 32; // ceil(32/32)*32
+const N_BATCH = 24; // matches t0.run's default desktop batch group size
+
+ort.env.wasm.wasmPaths = './';
+ort.env.wasm.simd = true;
+
+function median(a) {
+  const s = [...a].sort((x, y) => x - y);
+  const n = s.length;
+  return n % 2 ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2;
+}
+
+function buildFeeds(nRows, contextArr) {
+  // contextArr: Float32Array[CONTEXT], same context repeated per row (batch bench)
+  // or a single row for the single-signal / verification runs.
+  const target_context = new Float32Array(nRows * CONTEXT);
+  for (let r = 0; r < nRows; r++) target_context.set(contextArr, r * CONTEXT);
+  const target_group_ids = new Int32Array(nRows);
+  for (let r = 0; r < nRows; r++) target_group_ids[r] = r; // independent series, distinct group ids
+  return {
+    target_context: new ort.Tensor('float32', target_context, [nRows, CONTEXT]),
+    target_group_ids: new ort.Tensor('int32', target_group_ids, [nRows]),
+    future_covariate_context: new ort.Tensor('float32', new Float32Array(0), [0, CONTEXT]),
+    future_covariate_future: new ort.Tensor('float32', new Float32Array(0), [0, COMPUTE_HORIZON]),
+    future_covariate_group_ids: new ort.Tensor('int32', new Int32Array(0), [0]),
+  };
+}
+
+async function loadSeries() {
+  const buf = await fetch(SERIES_URL).then((r) => r.arrayBuffer());
+  return new Float32Array(buf);
+}
+
+async function makeSession(ep) {
+  const opts = { graphOptimizationLevel: 'basic' };
+  if (ep === 'webgpu') {
+    opts.executionProviders = [{
+      name: 'webgpu',
+      forceCpuNodeNames: [
+        'n5_3','n5_4','n5_5','n5_6','n5','n5_2','node_bitwise_not','node_bitwise_or','node_ne',
+        'node_cos','node_sin','node_bitwise_not_1','node_bitwise_not_5','node_bitwise_and',
+        'node_pow_2','node_bitwise_not_3','node_bitwise_not_6','node_pow_3','node_bitwise_not_8',
+        'node_pow_1','node_bitwise_and_1','node_bitwise_not_7','node_bitwise_and_7','node_bitwise_and_2',
+        'node_bitwise_and_8','node_bitwise_and_3','node_bitwise_and_4','node_bitwise_and_5',
+        'node_bitwise_or_2','node_bitwise_and_6','node_sinh',
+      ],
+    }, 'wasm'];
+  } else {
+    opts.executionProviders = ['wasm'];
+  }
+  return ort.InferenceSession.create(MODEL_URL, opts);
+}
+
+window.__bench = {
+  async run() {
+    const results = { sizeBytes: null, ep: null, cold: null, warmMedian: null, warmAll: null, batch: null, verify: null };
+
+    const modelResp = await fetch(MODEL_URL, { method: 'HEAD' });
+    results.sizeBytes = parseInt(modelResp.headers.get('content-length') || '0', 10);
+
+    const series = await loadSeries();
+    const origin = 3600;
+    const ctx = series.slice(origin - CONTEXT, origin);
+
+    let session, ep;
+    try {
+      session = await makeSession('webgpu');
+      ep = session.handler && session.handler.executionProviderName ? session.handler.executionProviderName : 'webgpu(requested)';
+      // Verify it actually runs on webgpu, not just constructed:
+      const feeds = buildFeeds(1, ctx);
+      const t0 = performance.now();
+      const out = await session.run(feeds);
+      const t1 = performance.now();
+      results.cold = t1 - t0;
+      results.ep = 'webgpu';
+      results.firstOutput = Array.from(out.quantiles.data.slice(0, HORIZON * 5));
+    } catch (e) {
+      log('webgpu EP failed: ' + (e && e.message ? e.message : String(e)));
+      session = await makeSession('wasm');
+      ep = 'wasm';
+      const feeds = buildFeeds(1, ctx);
+      const t0 = performance.now();
+      const out = await session.run(feeds);
+      const t1 = performance.now();
+      results.cold = t1 - t0;
+      results.ep = 'wasm';
+      results.firstOutput = Array.from(out.quantiles.data.slice(0, HORIZON * 5));
+    }
+
+    // warm median of 10
+    const feeds1 = buildFeeds(1, ctx);
+    const times = [];
+    for (let i = 0; i < 10; i++) {
+      const t0 = performance.now();
+      const out = await session.run(feeds1);
+      const t1 = performance.now();
+      times.push(t1 - t0);
+      results.firstOutput = Array.from(out.quantiles.data.slice(0, HORIZON * 5));
+    }
+    results.warmAll = times;
+    results.warmMedian = median(times);
+
+    // 24-signal batch (chunked by 16 to match our own kernel's constraint --
+    // reported as one "batch of N" number here since this ONNX graph has a
+    // dynamic batch dim, not a hard 16 cap).
+    try {
+      const feedsBatch = buildFeeds(N_BATCH, ctx);
+      const t0 = performance.now();
+      await session.run(feedsBatch);
+      const t1 = performance.now();
+      results.batch = { n: N_BATCH, ms: t1 - t0, msPerSignal: (t1 - t0) / N_BATCH };
+    } catch (e) {
+      results.batch = { error: e.message || String(e) };
+    }
+
+    return results;
+  },
+};
+
+log('ready');
+</script>
+</body>
+</html>
