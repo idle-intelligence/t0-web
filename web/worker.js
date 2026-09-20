@@ -27,10 +27,10 @@ const LOCAL_MODELS_DIR = '';
 // The four released weights. Each Hugging Face repo holds one GGUF plus its
 // config.json (the source of that model's quantile levels).
 const MODELS = {
-    'alpha-q8': { label: 'alpha Q8_0 (109 MB)', hfRepo: 'idle-intelligence/t0-alpha-q8_0-webgpu', file: 't0-alpha-q8_0.gguf' },
-    'alpha-q4': { label: 'alpha Q4_0 (59 MB)', hfRepo: 'idle-intelligence/t0-alpha-q4_0-webgpu', file: 't0-alpha-q4_0.gguf' },
-    'beta-q8': { label: 'beta Q8_0 (275 MB)', hfRepo: 'idle-intelligence/t0-beta-q8_0-webgpu', file: 't0-beta-q8_0.gguf' },
-    'beta-q4': { label: 'beta Q4_0 (149 MB)', hfRepo: 'idle-intelligence/t0-beta-q4_0-webgpu', file: 't0-beta-q4_0.gguf' },
+    'alpha-q8': { label: 'alpha Q8_0 · 109 MB', hfRepo: 'idle-intelligence/t0-alpha-q8_0-webgpu', file: 't0-alpha-q8_0.gguf' },
+    'alpha-q4': { label: 'alpha Q4_0 · 59 MB', hfRepo: 'idle-intelligence/t0-alpha-q4_0-webgpu', file: 't0-alpha-q4_0.gguf' },
+    'beta-q8': { label: 'beta Q8_0 · 275 MB', hfRepo: 'idle-intelligence/t0-beta-q8_0-webgpu', file: 't0-beta-q8_0.gguf' },
+    'beta-q4': { label: 'beta Q4_0 · 149 MB', hfRepo: 'idle-intelligence/t0-beta-q4_0-webgpu', file: 't0-beta-q4_0.gguf' },
 };
 const DEFAULT_MODEL_KEY = 'alpha-q4';
 
