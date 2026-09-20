@@ -13,6 +13,8 @@ const ONNX_MODEL_URL = '../onnx/t0-alpha-grouped-int8.onnx';
 const ONNX_SERIES_URL = '../onnx/series.f32';
 const OURS_PKG = '../ours/pkg-fast/t0_wasm.js';
 const OURS_GGUF = { q8_0: '../ours/t0-alpha-q8_0.gguf', q4_0: '../ours/t0-alpha-q4_0.gguf' };
+const OURS_F32_SAFETENSORS = '../ours/t0-alpha-f32.safetensors';
+const OURS_F32_CONFIG = '../ours/t0-alpha-f32-config.json';
 
 const CH_OPTIONS = [
     { context: 512, horizon: 32 },
@@ -210,6 +212,21 @@ async function oursRun(model, context, horizon) {
     return { ms, data: out };
 }
 
+// F32-residency reference build: the raw, never-quantized model.safetensors
+// (same file t0-cli export-gguf reads from) loaded through t0-fast's F32
+// path (T0Wasm.loadF32) -- ground truth for the agreement table, not a
+// Q8_0/Q4_0 GGUF dequantized back to f32.
+async function loadOursF32() {
+    const t0wasm = await import(OURS_PKG);
+    await t0wasm.default();
+    await t0wasm.initBackend();
+    const [stBuf, configText] = await Promise.all([
+        fetch(OURS_F32_SAFETENSORS).then((r) => r.arrayBuffer()),
+        fetch(OURS_F32_CONFIG).then((r) => r.text()),
+    ]);
+    return t0wasm.T0Wasm.loadF32(new Uint8Array(stBuf), configText);
+}
+
 // ---- agreement ----
 function extractMedianAndBands(data, horizon, nq, medianIdx) {
     const median_ = new Float64Array(horizon);
@@ -289,16 +306,30 @@ function renderBatchTable(rows) {
     }
 }
 
+// `agreement` = { oursVsF32, theirsVsF32, theirsVsOurs }, each a
+// computeAgreement() result. Three rows per quantile (plus overall): the
+// 1e-6-scale row (ours vs the true F32 reference) sits next to the
+// quantized-vs-quantized rows so the two error sources aren't conflated.
+const AGREE_NOTE = 'The 1e-6 parity is our engine against the F32 reference with identical weights; the difference between the two quantized models is the sum of their two quantization errors.';
+const AGREE_COMPARISONS = [
+    ['theirsVsOurs', 'theirs (INT8) vs ours (quantized)'],
+    ['oursVsF32', 'ours (quantized) vs F32 reference'],
+    ['theirsVsF32', 'theirs (INT8) vs F32 reference'],
+];
+
 function renderAgreementTable(agreement) {
+    document.getElementById('agreeNote').textContent = AGREE_NOTE;
     const tbody = document.querySelector('#agreeTable tbody');
     tbody.innerHTML = '';
-    const overallRow = document.createElement('tr');
-    overallRow.innerHTML = `<td><b>overall</b></td><td>${agreement.overall.maxAbs.toFixed(3)}</td><td>${agreement.overall.maxAbsPct.toFixed(2)}%</td><td>${agreement.overall.meanAbs.toFixed(3)}</td><td>${agreement.overall.meanAbsPct.toFixed(2)}%</td>`;
-    tbody.appendChild(overallRow);
-    for (const r of agreement.perQuantile) {
+    const addRow = (label, cmpLabel, r) => {
         const tr = document.createElement('tr');
-        tr.innerHTML = `<td>Q${Math.round(r.level * 100)}</td><td>${r.maxAbs.toFixed(3)}</td><td>${r.maxAbsPct.toFixed(2)}%</td><td>${r.meanAbs.toFixed(3)}</td><td>${r.meanAbsPct.toFixed(2)}%</td>`;
+        tr.innerHTML = `<td>${label}</td><td>${cmpLabel}</td><td>${r.maxAbs.toFixed(3)}</td><td>${r.maxAbsPct.toFixed(2)}%</td><td>${r.meanAbs.toFixed(3)}</td><td>${r.meanAbsPct.toFixed(2)}%</td>`;
         tbody.appendChild(tr);
+    };
+    for (const [key, cmpLabel] of AGREE_COMPARISONS) addRow('overall', cmpLabel, agreement[key].overall);
+    for (let qi = 0; qi < NQ; qi++) {
+        const label = `Q${Math.round(QUANTILE_LEVELS[qi] * 100)}`;
+        for (const [key, cmpLabel] of AGREE_COMPARISONS) addRow(label, cmpLabel, agreement[key].perQuantile[qi]);
     }
 }
 
@@ -403,6 +434,9 @@ async function run(overrideConfig) {
         setStatus('loading', 'loading t0-fast (' + cfg.quant + ', ours)...');
         const ours = await loadOurs(cfg.quant);
 
+        setStatus('loading', 'loading t0-fast F32 reference...');
+        const f32Model = await loadOursF32();
+
         setStatus('generating', 'cold calls...');
         const theirsCold = await onnxRun(theirs.session, [context], cfg.context, cfg.horizon);
         const oursCold = await oursRun(ours.model, context, cfg.horizon);
@@ -425,29 +459,56 @@ async function run(overrideConfig) {
 
         setStatus('generating', 'batch 24...');
         const batchRows = [];
+        const rows = cfg.usePasted ? Array.from({ length: N_BATCH }, () => context) : shiftedContexts(series, cfg.context, N_BATCH, ORIGIN);
+        const batchNote = cfg.usePasted ? 'same window x24 (no history to shift)' : '24 distinct shifted windows (stride 1 day)';
         try {
-            const rows = cfg.usePasted ? Array.from({ length: N_BATCH }, () => context) : shiftedContexts(series, cfg.context, N_BATCH, ORIGIN);
             const { ms } = await onnxRun(theirs.session, rows, cfg.context, cfg.horizon);
-            batchRows.push({ engine: 'theirs (ONNX)', msTotal: ms, msPerSignal: ms / N_BATCH, note: cfg.usePasted ? 'same window x24 (no history to shift)' : '24 shifted windows (stride 1)' });
+            batchRows.push({ engine: 'theirs (ONNX)', msTotal: ms, msPerSignal: ms / N_BATCH, note: batchNote });
         } catch (e) {
             batchRows.push({ engine: 'theirs (ONNX)', error: e.message || String(e) });
         }
+        let rowParityMaxAbs = null;
         try {
+            const concatRows = new Float32Array(N_BATCH * cfg.context);
+            for (let r = 0; r < N_BATCH; r++) concatRows.set(rows[r], r * cfg.context);
+            const lengths = Uint32Array.from({ length: N_BATCH }, () => cfg.context);
             const t0 = performance.now();
-            await ours.model.forecastBatch(context, N_BATCH, cfg.horizon, N_BATCH);
+            const batchOut = await ours.model.forecastBatchRows(concatRows, lengths, cfg.horizon);
             const ms = performance.now() - t0;
-            batchRows.push({ engine: 'ours (t0-fast)', msTotal: ms, msPerSignal: ms / N_BATCH, note: 'same window x24 (forecastBatch takes one context, API constraint)' });
+            batchRows.push({ engine: 'ours (t0-fast)', msTotal: ms, msPerSignal: ms / N_BATCH, note: batchNote });
+
+            // Headless parity gate: every row of forecastBatchRows must
+            // equal that row's own single-signal forecast() within 1e-4.
+            setStatus('generating', 'batch-rows parity check...');
+            const perRow = cfg.horizon * NQ;
+            let maxAbs = 0;
+            for (let r = 0; r < N_BATCH; r++) {
+                const single = await ours.model.forecast(rows[r], cfg.horizon);
+                for (let i = 0; i < perRow; i++) {
+                    maxAbs = Math.max(maxAbs, Math.abs(batchOut[r * perRow + i] - single[i]));
+                }
+            }
+            rowParityMaxAbs = maxAbs;
+            if (maxAbs > 1e-4) {
+                throw new Error(`forecastBatchRows parity gate failed: max-abs diff ${maxAbs} > 1e-4 across ${N_BATCH} rows`);
+            }
         } catch (e) {
             batchRows.push({ engine: 'ours (t0-fast)', error: e.message || String(e) });
         }
 
         // agreement: computeHorizon on theirs side may exceed cfg.horizon
         // (padded to a multiple of 32) -- slice both down to cfg.horizon.
+        setStatus('generating', 'F32 reference forecast...');
+        const f32Full = await oursRun(f32Model, context, cfg.horizon).then((r) => r.data);
         const theirsFull = theirsLast.data;
         const oursFull = oursLast.data;
         const theirsSliced = new Float64Array(cfg.horizon * NQ);
         for (let t = 0; t < cfg.horizon; t++) for (let qi = 0; qi < NQ; qi++) theirsSliced[t * NQ + qi] = theirsFull[t * NQ + qi];
-        const agreement = computeAgreement(theirsSliced, oursFull, cfg.horizon, NQ);
+        const agreement = {
+            oursVsF32: computeAgreement(oursFull, f32Full, cfg.horizon, NQ),
+            theirsVsF32: computeAgreement(theirsSliced, f32Full, cfg.horizon, NQ),
+            theirsVsOurs: computeAgreement(theirsSliced, oursFull, cfg.horizon, NQ),
+        };
         const theirsBands = extractMedianAndBands(theirsSliced, cfg.horizon, NQ, MEDIAN_IDX);
         const oursBands = extractMedianAndBands(oursFull, cfg.horizon, NQ, MEDIAN_IDX);
 
@@ -474,11 +535,20 @@ async function run(overrideConfig) {
 
         setStatus('ready', `done: context=${cfg.context} horizon=${cfg.horizon} quant=${cfg.quant}`);
 
-        const result = { config: cfg, latencyRows, batchRows, agreement, gpuInfo, ua: navigator.userAgent, timestamp: new Date().toISOString() };
+        const result = { config: cfg, latencyRows, batchRows, agreement, rowParityMaxAbs, gpuInfo, ua: navigator.userAgent, timestamp: new Date().toISOString() };
         state.lastResult = result;
         return result;
     } catch (e) {
-        setStatus('error', 'error: ' + (e.message || String(e)));
+        const msg = e.message || String(e);
+        // A stale pkg-fast bundle (built before a wasm-bindgen export was
+        // added, e.g. forecastBatchRows/loadF32) throws a raw JS
+        // "X is not a function" TypeError -- surface that as an actionable
+        // status instead of the confusing raw message.
+        if (e instanceof TypeError && /is not a function/.test(msg)) {
+            setStatus('loading', 'rebuilding engine...');
+        } else {
+            setStatus('error', 'error: ' + msg);
+        }
         throw e;
     } finally {
         document.getElementById('runBtn').disabled = false;

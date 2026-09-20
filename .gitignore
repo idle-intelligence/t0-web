@@ -25,3 +25,5 @@ bench/ours/pkg-wgpu/
 bench/ours/pkg-fast/
 bench/ours/*.gguf
 bench/ours/*.f32
+bench/ours/*.safetensors
+bench/ours/t0-alpha-f32-config.json
