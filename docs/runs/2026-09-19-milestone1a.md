@@ -14,7 +14,7 @@ The large Q4_0 max-rel figures (up to ~94x in the fixture table) come from the r
 
 `t0-cli --backend wgpu` now genuinely executes via `burn-wgpu` on Metal (previously only compiled). F32 parity against the PyTorch reference: worst-case 1.6e-6 max-abs, same order of magnitude as ndarray's 1.2e-6 — and wgpu vs ndarray agree to within ~1e-4 on both F32 and f16-GGUF inputs, satisfying this milestone's actual requirement (the f16-GGUF-vs-PyTorch max-abs of 4.15e-4 exceeding the strict 1e-4 parity gate is expected and is the same number ndarray produces for the same quantized input — it's a quantization-precision fact, not a backend-divergence bug).
 
-`--backend` is checked against the binary's compiled Cargo feature and errors on mismatch rather than attempting a runtime backend switch: two different Burn `Backend` types can't coexist in one binary without dynamic dispatch, and this repo's CLAUDE.md/GOAL.md constraints (RAM tight, one cargo build at a time) make "one binary per backend feature" the right tradeoff over adding that machinery for this milestone.
+`--backend` is checked against the binary's compiled Cargo feature and errors on mismatch rather than attempting a runtime backend switch: two different Burn `Backend` types can't coexist in one binary without dynamic dispatch, and this repo's constraints (RAM tight, one cargo build at a time) make "one binary per backend feature" the right tradeoff over adding that machinery for this milestone.
 
 ## Batch path
 

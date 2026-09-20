@@ -19,7 +19,7 @@
   wasm/mjs files copied from `node_modules/onnxruntime-web/dist/`), no CDN
   at test time.
 - wgpu backend: `burn-wgpu` / `burn` `0.20` (`Cargo.toml`), `cubecl-wgpu`
-  transitively (pinned pre-1.0 versions per this repo's `CLAUDE.md`).
+  transitively (pinned pre-1.0 versions).
 - Artifact under test (theirs): `theforecastingcompany/t0-alpha-onnx-int8`,
   `t0-alpha-grouped-int8.onnx`, 107,151,882 bytes, already present at
   `~/Code/idle-intelligence/models/hf/theforecastingcompany/t0-alpha-onnx-int8/`

@@ -1,6 +1,6 @@
 # t0-web
 
-Port of The Forecasting Company's [t0-alpha](https://huggingface.co/theforecastingcompany/t0-alpha) time-series forecaster to Burn/wgpu, native and WASM+WebGPU. See `CLAUDE.md` for working rules, `docs/reports/t0-alpha.md` for the architecture research.
+Port of The Forecasting Company's [t0-alpha](https://huggingface.co/theforecastingcompany/t0-alpha) time-series forecaster to Burn/wgpu, native and WASM+WebGPU. See `docs/reports/t0-alpha.md` for the architecture research.
 
 ## Status: Milestone 0 (native numerical parity, F32)
 
@@ -45,7 +45,7 @@ Python is used here only because the reference implementation is itself PyTorch 
 
 ## Parity gate
 
-Needs the t0-alpha checkpoint (not committed — weights are never committed, per `CLAUDE.md`):
+Needs the t0-alpha checkpoint (not committed; weights are never committed):
 ```
 hf download theforecastingcompany/t0-alpha --local-dir ~/Code/idle-intelligence/models/hf/theforecastingcompany/t0-alpha
 cargo run -p t0-cli --release -- parity \

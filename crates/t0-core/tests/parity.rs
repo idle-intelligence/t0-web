@@ -1,7 +1,7 @@
 //! Numerical parity against the reference PyTorch fixtures in `fixtures/`
 //! (see `tools/make_fixtures.py`). `#[ignore]`d with a reason: it needs both
 //! the fixtures (committed, small) and the t0-alpha checkpoint (not
-//! committed — weights are never committed per this repo's CLAUDE.md).
+//! committed — weights are never committed).
 //!
 //! `t0-cli parity` runs the same check with per-fixture output for manual
 //! divergence-hunting; this test is the CI-shaped "did it stay passing" gate.
