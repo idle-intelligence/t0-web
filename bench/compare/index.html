@@ -111,11 +111,11 @@ canvas { display: block; width: 100%; }
 <body>
 <header>
     <p class="org">idle intelligence</p>
-    <h1>t0-web — compare</h1>
+    <h1>t0-web compare</h1>
     <p class="tagline">
-        theforecastingcompany's t0-alpha-onnx-int8 export (onnxruntime-web,
-        WebGPU EP with wasm fallback) vs our GGUF-resident t0-fast
-        (Q8_0/Q4_0), both loaded live in this tab.
+        The Forecasting Company (TFC) t0-alpha ONNX INT8 export, run by onnxruntime-web
+        (WebGPU with wasm fallback), next to the idle intelligence (II) t0-fast engine
+        on GGUF weights (Q8_0/Q4_0), both loaded live in this tab.
     </p>
 </header>
 
@@ -163,7 +163,7 @@ canvas { display: block; width: 100%; }
         </thead>
         <tbody></tbody>
     </table>
-    <div class="io-chart"><canvas id="overlayChart"></canvas></div>
+    <canvas id="overlayChart" class="io-chart"></canvas>
     <div class="legend">
         <span id="legendTheirs">— TFC (median, Q10-Q90)</span>
         <span id="legendOurs">- - II (median, Q10-Q90)</span>
