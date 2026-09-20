@@ -1,10 +1,17 @@
 # t0-web
 
-Port of The Forecasting Company's [t0-alpha](https://huggingface.co/theforecastingcompany/t0-alpha) time-series forecaster to Burn/wgpu, native and WASM+WebGPU. See `docs/reports/t0-alpha.md` for the architecture research.
+t0-alpha and t0-beta, The Forecasting Company's time-series foundation models, running in the browser: Rust compiled to WebAssembly, WebGPU inference with a CPU fallback, weights quantized to Q8_0 or Q4_0 GGUF.
 
-## Status: Milestone 0 (native numerical parity, F32)
+[**Try the demo →**](https://idle-intelligence.github.io/t0-web/web/) · [**Compare page**](bench/compare/): the same engine next to the official ONNX INT8 export, runs locally (see `docs/runs/2026-09-20-compare-page.md`)
 
-`crates/t0-core` is a backend-generic Burn 0.20 port of `T0Forecaster` (see [`tfc-t0` PyPI package](https://pypi.org/project/tfc-t0/), the official PyTorch implementation) matching the reference to 1.2e-6 max-abs error on 3 fixtures (`docs/BENCHMARKS.md`). No quantization, no WGSL kernels, no browser page yet — that's Milestone 1+.
+> **Disclaimer:** independent port by ilnmtlbnm@idle-intelligence, not affiliated with or endorsed by The Forecasting Company. Weights are quantized from [theforecastingcompany/t0-alpha](https://huggingface.co/theforecastingcompany/t0-alpha) and [theforecastingcompany/t0-beta](https://huggingface.co/theforecastingcompany/t0-beta) (Apache-2.0); forecasts may differ slightly from the PyTorch implementation.
+
+## Status
+
+- F32 port matches the PyTorch reference to 1.2e-6 max-abs error (alpha) and 3.2e-6 (beta), native and browser.
+- Full GIFT-Eval protocol, 97 configs, normalized to Seasonal Naive: Q4_0 scores MASE 0.7334 / CRPS 0.4973, against our F32 control at 0.7255 / 0.4942 and the published t0-alpha card at 0.7240 / 0.4941 (`docs/runs/2026-09-20-official-protocol-full97-normalized.md`).
+- Quantized weights on Hugging Face: [alpha Q4_0](https://huggingface.co/idle-intelligence/t0-alpha-q4_0-webgpu) · [alpha Q8_0](https://huggingface.co/idle-intelligence/t0-alpha-q8_0-webgpu) · [beta Q4_0](https://huggingface.co/idle-intelligence/t0-beta-q4_0-webgpu) · [beta Q8_0](https://huggingface.co/idle-intelligence/t0-beta-q8_0-webgpu).
+- Architecture research in `docs/reports/t0-alpha.md` and `docs/reports/t0-alpha-anatomy.md`.
 
 ## Layout
 
