@@ -622,8 +622,10 @@
             const end = Math.min(series.length - 1, INPUT_WINDOW.end + 32);
             let lo = Infinity, hi = -Infinity;
             for (let i = start; i <= end; i++) { lo = Math.min(lo, series[i]); hi = Math.max(hi, series[i]); }
-            const pad = (hi - lo) * 0.1 || 1;
-            cachedDomain = { lo: lo - pad, hi: hi + pad };
+            // 5% margin, then snapped outward to a round 500, so the axis reads
+            // as whole numbers (7,500 to 13,500 for this series).
+            const pad = (hi - lo) * 0.05 || 1;
+            cachedDomain = { lo: Math.floor((lo - pad) / 500) * 500, hi: Math.ceil((hi + pad) / 500) * 500 };
             return cachedDomain;
         }
 
