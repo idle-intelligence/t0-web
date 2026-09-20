@@ -55,7 +55,11 @@ async fn forecast_window_async(engine: &Engine, model: &GpuModel, raw: TimeSerie
     let pad_left = (patch_size - t_ctx % patch_size) % patch_size;
     let padded_horizon = horizon.div_ceil(patch_size) * patch_size;
     let padded_t_ctx = t_ctx + pad_left;
-    assert!(padded_t_ctx + padded_horizon <= 1024, "beyond max_horizon needs autoregressive rollout (unimplemented)");
+    assert!(
+        padded_horizon <= t0_core::MAX_HORIZON,
+        "single-window forecast can't exceed max_horizon ({}) in one pass -- use forecast_rollout",
+        t0_core::MAX_HORIZON
+    );
 
     let window = raw.pad(patch_size, t_ctx);
 
@@ -139,4 +143,94 @@ pub async fn forecast_batch_chunked_async(
 #[allow(clippy::too_many_arguments)]
 pub fn forecast_batch_chunked(engine: &Engine, model: &GpuModel, contexts: &[f32], n_signals: usize, t_ctx: usize, horizon: usize, chunk_size: usize) -> Result<Vec<f32>> {
     pollster::block_on(forecast_batch_chunked_async(engine, model, contexts, n_signals, t_ctx, horizon, chunk_size))
+}
+
+/// `t0_core::model::forecast_rollout`, ported to call this crate's own
+/// `forecast`/`forecast_batch_chunked` per AR block instead of Burn's. The
+/// re-windowing bookkeeping and `QuantileRolloutReducer` math are identical
+/// CPU-side plain-`f32` code (via `t0_core::quantile`) -- only the per-block
+/// forward pass differs, so this is a straight port, not a
+/// reimplementation; see `t0_core::model::forecast_rollout`'s doc comment
+/// for the feed-back rule and re-windowing this mirrors. Restricted the same
+/// way: a single univariate target series, no known-future covariates.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn forecast_rollout(
+    engine: &Engine,
+    model: &GpuModel,
+    context: &[f32],
+    t_ctx: usize,
+    prediction_length: usize,
+    query_quantile_levels: &[f32],
+) -> Result<Vec<f32>> {
+    use t0_core::quantile::{interpolate_quantiles, prob_mass, weighted_quantile};
+
+    let patch_size = model.config.patch_size;
+    let trained = &model.config.quantile_levels;
+    let n_trained = trained.len();
+    let trained_mass = prob_mass(trained);
+    let n_query = query_quantile_levels.len();
+    let query_mass = prob_mass(query_quantile_levels);
+    let round_up = |x: usize, m: usize| x.div_ceil(m) * m;
+    let context_width = round_up(t_ctx, patch_size);
+
+    let horizon0 = round_up(prediction_length, patch_size).min(t0_core::MAX_HORIZON);
+    let block0 = forecast(engine, model, context, 1, t_ctx, horizon0)?;
+    let mut first: Vec<f32> = Vec::with_capacity(horizon0 * n_query);
+    for h in 0..horizon0 {
+        first.extend(interpolate_quantiles(query_quantile_levels, trained, &block0[h * n_trained..(h + 1) * n_trained]));
+    }
+    if prediction_length <= horizon0 {
+        first.truncate(prediction_length * n_query);
+        return Ok(first);
+    }
+
+    let n_paths = n_query;
+    let mut paths_context: Vec<Vec<f32>> = vec![context.to_vec(); n_paths];
+    let mut remaining = prediction_length - horizon0;
+    let mut prev_block = first.clone();
+    let mut prev_width = horizon0;
+    let mut out_chunks: Vec<Vec<f32>> = vec![first];
+
+    while remaining > 0 {
+        for (j, buf) in paths_context.iter_mut().enumerate() {
+            for h in 0..prev_width {
+                buf.push(prev_block[h * n_query + j]);
+            }
+        }
+        let horizon = round_up(remaining, patch_size).min(t0_core::MAX_HORIZON);
+        let mut batch_ctx = vec![0.0f32; n_paths * context_width];
+        for (j, buf) in paths_context.iter().enumerate() {
+            let start = buf.len() - context_width.min(buf.len());
+            let window = &buf[start..];
+            let dst = &mut batch_ctx[j * context_width..(j + 1) * context_width];
+            dst[context_width - window.len()..].copy_from_slice(window);
+        }
+        // n_paths (== len(query_quantile_levels), 5 for t0-alpha) chunk: goes through the batch path, one forward pass.
+        let blocks = forecast_batch_chunked(engine, model, &batch_ctx, n_paths, context_width, horizon, n_paths)?;
+
+        let mut reduced = Vec::with_capacity(horizon * n_query);
+        let mut samples = vec![0.0f32; n_paths * n_trained];
+        let mut weights = vec![0.0f32; n_paths * n_trained];
+        for j in 0..n_paths {
+            for pq in 0..n_trained {
+                weights[j * n_trained + pq] = trained_mass[pq] * query_mass[j];
+            }
+        }
+        for h in 0..horizon {
+            for j in 0..n_paths {
+                for pq in 0..n_trained {
+                    samples[j * n_trained + pq] = blocks[j * horizon * n_trained + h * n_trained + pq];
+                }
+            }
+            reduced.extend(weighted_quantile(query_quantile_levels, &weights, &samples));
+        }
+
+        prev_width = horizon;
+        prev_block = reduced.clone();
+        out_chunks.push(reduced);
+        remaining -= horizon;
+    }
+    let mut out: Vec<f32> = out_chunks.concat();
+    out.truncate(prediction_length * n_query);
+    Ok(out)
 }
