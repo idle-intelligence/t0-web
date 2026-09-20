@@ -612,6 +612,21 @@
         // drawn data never changes; only the origin marker moves over it.
         // Days after the origin are drawn lighter so the split reads at a
         // glance (still real history -- the model just never sees them).
+        // One fixed y-scale for both charts, from the input window plus the
+        // 32 forecast days after it, with a 10% margin: forecasts from
+        // different models and origins stay directly comparable.
+        let cachedDomain = null;
+        function chartDomain() {
+            if (cachedDomain) return cachedDomain;
+            const start = INPUT_WINDOW.start;
+            const end = Math.min(series.length - 1, INPUT_WINDOW.end + 32);
+            let lo = Infinity, hi = -Infinity;
+            for (let i = start; i <= end; i++) { lo = Math.min(lo, series[i]); hi = Math.max(hi, series[i]); }
+            const pad = (hi - lo) * 0.1 || 1;
+            cachedDomain = { lo: lo - pad, hi: hi + pad };
+            return cachedDomain;
+        }
+
         function drawInputChart() {
             const { w, h } = fitCanvas(inputCanvas, inputCtx);
             inputCtx.clearRect(0, 0, w, h);
@@ -620,10 +635,7 @@
             const plotW = w - PAD_L - PAD_R;
             const xAt = (i) => PAD_L + ((i - start) / (end - start)) * plotW;
 
-            let lo = Infinity, hi = -Infinity;
-            for (let i = start; i <= end; i++) { lo = Math.min(lo, series[i]); hi = Math.max(hi, series[i]); }
-            const pad = (hi - lo) * 0.1 || 1;
-            const domain = { lo: lo - pad, hi: hi + pad };
+            const domain = chartDomain();
             const yAt = drawGridlines(inputCtx, w, h, xAt, domain);
             drawXTicks(inputCtx, w, h, xAt, start, end);
 
@@ -663,13 +675,7 @@
             const plotW = w - PAD_L - PAD_R;
             const xAt = (t) => PAD_L + (t / (hZ - 1)) * plotW;
 
-            let lo = Infinity, hi = -Infinity;
-            for (const v of quantiles) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
-            for (let t = 0; t < hZ; t++) {
-                if (ORIGIN + t < series.length) { lo = Math.min(lo, series[ORIGIN + t]); hi = Math.max(hi, series[ORIGIN + t]); }
-            }
-            const pad = (hi - lo) * 0.1 || 1;
-            const domain = { lo: lo - pad, hi: hi + pad };
+            const domain = chartDomain();
             const yAt = drawGridlines(outputCtx, w, h, xAt, domain);
             // xAt here maps a horizon step t (0..hZ-1), not an absolute
             // series index -- drawXTicks assumes the two coincide (true for
