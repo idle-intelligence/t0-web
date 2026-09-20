@@ -21,7 +21,6 @@ use crate::pool::Pool;
 use crate::quant::{load_matmul_weight, load_matmul_weight_gguf, MatMulWeight, WeightQuant};
 use crate::rope_tables::RopeTables;
 
-const HEAD_DIM: u32 = 64;
 const TILED_THRESHOLD_ROWS: u32 = 32;
 
 #[repr(C)]
@@ -547,12 +546,13 @@ fn rmsnorm_qk(
     scale: &wgpu::Buffer,
     rows: u32,
     heads: u32,
+    head_dim: u32,
     base_offset: u32,
     row_stride: u32,
 ) {
     let dims = pool.uniform(
         &format!("{key}.dims"),
-        RmsQkDims { rows, heads, head_dim: HEAD_DIM, base_offset, row_stride, _p0: 0, _p1: 0, _p2: 0 },
+        RmsQkDims { rows, heads, head_dim, base_offset, row_stride, _p0: 0, _p1: 0, _p2: 0 },
     );
     let bg = pool.bind_group(
         key,
@@ -578,13 +578,14 @@ fn rope(
     scale: &wgpu::Buffer,
     rows: u32,
     heads: u32,
+    head_dim: u32,
     base_offset: u32,
     row_stride: u32,
     seq_len: u32,
 ) {
     let dims = pool.uniform(
         &format!("{key}.dims"),
-        RopeDims { rows, heads, head_dim: HEAD_DIM, base_offset, row_stride, seq_len, _p0: 0, _p1: 0 },
+        RopeDims { rows, heads, head_dim, base_offset, row_stride, seq_len, _p0: 0, _p1: 0 },
     );
     let bg = pool.bind_group(
         key,
@@ -597,7 +598,7 @@ fn rope(
             BindGroupEntry { binding: 4, resource: dims.as_entire_binding() },
         ],
     );
-    let half = HEAD_DIM / 2;
+    let half = head_dim / 2;
     engine.dispatch(encoder, &engine.rope, &bg, ((rows * heads * half).div_ceil(64), 1, 1), key);
 }
 
@@ -611,6 +612,7 @@ fn rope(
 #[allow(clippy::too_many_arguments)]
 fn attention(engine: &Engine, pool: &Pool, encoder: &mut wgpu::CommandEncoder, key: &str, qkv: &wgpu::Buffer, mask: &wgpu::Buffer, outer: u32, seq: u32, heads: u32, embed: u32) -> wgpu::Buffer {
     debug_assert!(seq <= 256, "seq_len {seq} exceeds MAX_SEQ=256 in attention.wgsl");
+    let head_dim = embed / heads;
     let qkv_stride = 3 * embed;
     let out = pool.data(&format!("{key}.out"), (outer * seq * embed) as usize);
     let dims = pool.uniform(
@@ -622,7 +624,7 @@ fn attention(engine: &Engine, pool: &Pool, encoder: &mut wgpu::CommandEncoder, k
             embed,
             qkv_stride,
             mask_outer_stride: seq * seq,
-            scale: 1.0 / (HEAD_DIM as f32).sqrt(),
+            scale: 1.0 / (head_dim as f32).sqrt(),
             _p0: 0,
         },
     );
@@ -697,9 +699,7 @@ pub async fn forward_async(engine: &Engine, model: &GpuModel, series: &TimeSerie
     let heads = cfg.num_heads as u32;
     let rows = v * p;
 
-    if embed / heads != HEAD_DIM {
-        return Err(anyhow!("t0-fast Phase A hardcodes head_dim=64, config gives {}", embed / heads));
-    }
+    let head_dim = embed / heads;
 
     // --- patch encoder input (host-side concat, identical to model.rs) ---
     let mut concat = vec![0.0f32; (rows * patch_size * 3) as usize];
@@ -723,7 +723,7 @@ pub async fn forward_async(engine: &Engine, model: &GpuModel, series: &TimeSerie
 
     let time_mask_flat = build_time_mask(&patched_group_ids, &patched_variate_type, &attendable, series.v, p as usize);
     let group_mask_flat = build_group_mask(&patched_group_ids, series.v, p as usize);
-    let rope_tables = RopeTables::new(p as usize, HEAD_DIM as usize);
+    let rope_tables = RopeTables::new(p as usize, head_dim as usize);
 
     let mut encoder = engine.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("t0-fast forward") });
     let pool = &model.pool;
@@ -759,18 +759,18 @@ pub async fn forward_async(engine: &Engine, model: &GpuModel, series: &TimeSerie
         let attn_out = match layer.ty {
             LayerType::Time => {
                 let qkv = linear(engine, pool, &mut encoder, &lk("qkv"), &normed, rows, embed, &layer.w_qkv, &layer.b_qkv, 3 * embed, 0);
-                rmsnorm_qk(engine, pool, &mut encoder, &lk("qnorm"), &qkv, &layer.q_norm, rows, heads, 0, 3 * embed);
-                rmsnorm_qk(engine, pool, &mut encoder, &lk("knorm"), &qkv, &layer.k_norm, rows, heads, embed, 3 * embed);
-                rope(engine, pool, &mut encoder, &lk("ropeq"), &qkv, &cos_buf, &sin_buf, &scale_buf, rows, heads, 0, 3 * embed, p);
-                rope(engine, pool, &mut encoder, &lk("ropek"), &qkv, &cos_buf, &sin_buf, &scale_inv_buf, rows, heads, embed, 3 * embed, p);
+                rmsnorm_qk(engine, pool, &mut encoder, &lk("qnorm"), &qkv, &layer.q_norm, rows, heads, head_dim, 0, 3 * embed);
+                rmsnorm_qk(engine, pool, &mut encoder, &lk("knorm"), &qkv, &layer.k_norm, rows, heads, head_dim, embed, 3 * embed);
+                rope(engine, pool, &mut encoder, &lk("ropeq"), &qkv, &cos_buf, &sin_buf, &scale_buf, rows, heads, head_dim, 0, 3 * embed, p);
+                rope(engine, pool, &mut encoder, &lk("ropek"), &qkv, &cos_buf, &sin_buf, &scale_inv_buf, rows, heads, head_dim, embed, 3 * embed, p);
                 let attn_pre = attention(engine, pool, &mut encoder, &lk("attn"), &qkv, &time_mask_buf, v, p, heads, embed);
                 linear(engine, pool, &mut encoder, &lk("wo"), &attn_pre, rows, embed, &layer.w_o, &layer.b_o, embed, 0)
             }
             LayerType::Group => {
                 let normed_t = transpose_outer(engine, pool, &mut encoder, &lk("tr1"), &normed, v, p, embed);
                 let qkv = linear(engine, pool, &mut encoder, &lk("qkv"), &normed_t, rows, embed, &layer.w_qkv, &layer.b_qkv, 3 * embed, 0);
-                rmsnorm_qk(engine, pool, &mut encoder, &lk("qnorm"), &qkv, &layer.q_norm, rows, heads, 0, 3 * embed);
-                rmsnorm_qk(engine, pool, &mut encoder, &lk("knorm"), &qkv, &layer.k_norm, rows, heads, embed, 3 * embed);
+                rmsnorm_qk(engine, pool, &mut encoder, &lk("qnorm"), &qkv, &layer.q_norm, rows, heads, head_dim, 0, 3 * embed);
+                rmsnorm_qk(engine, pool, &mut encoder, &lk("knorm"), &qkv, &layer.k_norm, rows, heads, head_dim, embed, 3 * embed);
                 let attn_pre = attention(engine, pool, &mut encoder, &lk("attn"), &qkv, &group_mask_buf, p, v, heads, embed);
                 let attn_out_t = linear(engine, pool, &mut encoder, &lk("wo"), &attn_pre, rows, embed, &layer.w_o, &layer.b_o, embed, 0);
                 transpose_outer(engine, pool, &mut encoder, &lk("tr2"), &attn_out_t, p, v, embed)
