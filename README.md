@@ -2,7 +2,9 @@
 
 t0-alpha and t0-beta, The Forecasting Company's time-series foundation models, running in the browser: Rust compiled to WebAssembly, WebGPU inference with a CPU fallback, weights quantized to Q8_0 or Q4_0 GGUF.
 
-[**Try the demo →**](https://idle-intelligence.github.io/t0-web/web/) · [**Compare page**](bench/compare/): the same engine next to the official ONNX INT8 export, runs locally (see `docs/runs/2026-09-20-compare-page.md`)
+[**Try the demo →**](https://idle-intelligence.github.io/t0-web/web/)
+
+[**Compare page**](bench/compare/): the same engine next to the official ONNX INT8 export and an F32 reference, side by side in one tab. Runs locally (see `docs/runs/2026-09-20-compare-page.md`). Be advised: a run downloads all the models it compares, about 700 MB, and runs them all.
 
 > **Disclaimer:** independent port by ilnmtlbnm@idle-intelligence, not affiliated with or endorsed by The Forecasting Company. Weights are quantized from [theforecastingcompany/t0-alpha](https://huggingface.co/theforecastingcompany/t0-alpha) and [theforecastingcompany/t0-beta](https://huggingface.co/theforecastingcompany/t0-beta) (Apache-2.0); forecasts may differ slightly from the PyTorch implementation.
 
