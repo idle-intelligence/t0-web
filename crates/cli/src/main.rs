@@ -461,7 +461,7 @@ fn cmd_parity_fast(fixtures_dir: &Path, weights_path: &Path, config_path: Option
 
 #[cfg(feature = "fast")]
 #[allow(clippy::too_many_arguments)]
-fn cmd_bench_fast(weights_path: &Path, config_path: Option<&Path>, n_signals: usize, t_ctx: usize, horizon: usize, reps: usize, warmup: usize, fast_quant: &str) -> Result<()> {
+fn cmd_bench_fast(weights_path: &Path, config_path: Option<&Path>, n_signals: usize, t_ctx: usize, horizon: usize, reps: usize, warmup: usize, fast_quant: &str, chunk: usize) -> Result<()> {
     let file_size = std::fs::metadata(weights_path)?.len();
     let quant = t0_fast::WeightQuant::parse(fast_quant)?;
     let t0 = Instant::now();
@@ -471,24 +471,28 @@ fn cmd_bench_fast(weights_path: &Path, config_path: Option<&Path>, n_signals: us
     let load_time = t0.elapsed();
     let quantizable_gpu_bytes = model.quantizable_gpu_bytes();
     let context = synthetic_sines(n_signals, t_ctx);
+    // n_signals independent forecasts (t0_core::forecast_batch_chunked's
+    // TimeSeries::from_context_batch semantics), chunked exactly like
+    // cmd_bench's Burn path -- see t0-fast::forecast_batch_chunked.
+    let run = || t0_fast::forecast_batch_chunked(&engine, &model, &context, n_signals, t_ctx, horizon, chunk);
 
     for _ in 0..warmup {
-        let _ = t0_fast::forecast(&engine, &model, &context, n_signals, t_ctx, horizon)?;
+        let _ = run()?;
     }
     engine.pool.reset_alloc_count();
-    let _ = t0_fast::forecast(&engine, &model, &context, n_signals, t_ctx, horizon)?;
+    let _ = run()?;
     let warm_alloc_count = engine.pool.alloc_count();
 
     let mut times = Vec::with_capacity(reps);
     for _ in 0..reps {
         let t0 = Instant::now();
-        let _ = t0_fast::forecast(&engine, &model, &context, n_signals, t_ctx, horizon)?;
+        let _ = run()?;
         times.push(t0.elapsed().as_secs_f64());
     }
     let med = median(times.clone());
     println!(
         "backend=fast fast_quant={fast_quant} weights={} file_bytes={file_size} load_s={:.3} n_signals={n_signals} t_ctx={t_ctx} horizon={horizon} \
-         reps={reps} median_s={med:.4} per_signal_ms={:.4} warm_alloc_count={warm_alloc_count} quantizable_gpu_bytes={quantizable_gpu_bytes} all_s={times:?}",
+         chunk={chunk} reps={reps} median_s={med:.4} per_signal_ms={:.4} warm_alloc_count={warm_alloc_count} quantizable_gpu_bytes={quantizable_gpu_bytes} all_s={times:?}",
         weights_path.display(),
         load_time.as_secs_f64(),
         (med * 1000.0) / n_signals as f64,
@@ -663,7 +667,7 @@ fn main() -> Result<()> {
         "bench" => {
             #[cfg(feature = "fast")]
             if backend == "fast" {
-                return cmd_bench_fast(&weights, config.as_deref(), n_signals, t_ctx, horizon, reps, warmup, &fast_quant);
+                return cmd_bench_fast(&weights, config.as_deref(), n_signals, t_ctx, horizon, reps, warmup, &fast_quant, chunk);
             }
             check_backend_flag(&backend)?;
             cmd_bench(&weights, config.as_deref(), n_signals, t_ctx, horizon, reps, chunk, warmup)
