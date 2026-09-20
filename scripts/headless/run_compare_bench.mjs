@@ -60,14 +60,27 @@ for (const row of result.batchRows) {
   if (row.error) problems.push(`batch ${row.engine}: ${row.error}`);
   else if (!Number.isFinite(row.msTotal) || !Number.isFinite(row.msPerSignal)) problems.push(`batch ${row.engine} not finite`);
 }
-if (!Number.isFinite(result.agreement.overall.maxAbsPct)) problems.push('agreement.overall.maxAbsPct not finite');
-else if (result.agreement.overall.maxAbsPct >= 1.0) problems.push(`agreement max-abs ${result.agreement.overall.maxAbsPct.toFixed(3)}% of range >= 1%`);
+for (const key of ['oursVsF32', 'theirsVsF32', 'theirsVsOurs']) {
+  const pct = result.agreement[key].overall.maxAbsPct;
+  if (!Number.isFinite(pct)) problems.push(`agreement.${key}.overall.maxAbsPct not finite`);
+}
+const theirsVsOursPct = result.agreement.theirsVsOurs.overall.maxAbsPct;
+if (Number.isFinite(theirsVsOursPct) && theirsVsOursPct >= 1.0) problems.push(`agreement theirsVsOurs max-abs ${theirsVsOursPct.toFixed(3)}% of range >= 1%`);
+if (result.rowParityMaxAbs == null || !Number.isFinite(result.rowParityMaxAbs)) problems.push(`forecastBatchRows parity max-abs not finite: ${result.rowParityMaxAbs}`);
+else if (result.rowParityMaxAbs > 1e-4) problems.push(`forecastBatchRows parity max-abs ${result.rowParityMaxAbs} > 1e-4`);
 
 if (problems.length) {
   console.error('GATE FAILED:\n' + problems.map((p) => '- ' + p).join('\n'));
   await browser.close();
   process.exit(1);
 }
-console.log('GATE PASSED: all rows finite, agreement max-abs', result.agreement.overall.maxAbsPct.toFixed(3) + '% of range < 1%');
+console.log(
+  'GATE PASSED: all rows finite, agreement theirsVsOurs max-abs',
+  theirsVsOursPct.toFixed(3) + '% of range < 1%, ours-vs-F32 max-abs',
+  result.agreement.oursVsF32.overall.maxAbs.toExponential(3),
+  ', forecastBatchRows parity max-abs',
+  result.rowParityMaxAbs.toExponential(3),
+  '< 1e-4',
+);
 
 await browser.close();
