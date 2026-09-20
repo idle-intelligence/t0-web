@@ -1,0 +1,58 @@
+{
+  "reference": "tfc-t0 (PyPI) t0.model.model.T0Forecaster, theforecastingcompany/t0-beta",
+  "context_len": 512,
+  "horizon": 96,
+  "patch_size": 32,
+  "quantile_levels": [
+    0.01,
+    0.05,
+    0.1,
+    0.15,
+    0.2,
+    0.25,
+    0.3,
+    0.35,
+    0.4,
+    0.45,
+    0.5,
+    0.55,
+    0.6,
+    0.65,
+    0.7,
+    0.75,
+    0.8,
+    0.85,
+    0.9,
+    0.95,
+    0.99
+  ],
+  "cases": [
+    {
+      "name": "case0_univariate_sine",
+      "v": 1,
+      "n_patches": 19,
+      "context_file": "case0_univariate_sine_context.f32",
+      "quantiles_file": "case0_univariate_sine_quantiles.f32",
+      "patch_embedding_file": "case0_univariate_sine_patch_embedding.f32",
+      "layer0_output_file": "case0_univariate_sine_layer0_output.f32"
+    },
+    {
+      "name": "case1_trivariate_freqs",
+      "v": 3,
+      "n_patches": 19,
+      "context_file": "case1_trivariate_freqs_context.f32",
+      "quantiles_file": "case1_trivariate_freqs_quantiles.f32",
+      "patch_embedding_file": "case1_trivariate_freqs_patch_embedding.f32",
+      "layer0_output_file": "case1_trivariate_freqs_layer0_output.f32"
+    },
+    {
+      "name": "case2_masked_gap",
+      "v": 1,
+      "n_patches": 19,
+      "context_file": "case2_masked_gap_context.f32",
+      "quantiles_file": "case2_masked_gap_quantiles.f32",
+      "patch_embedding_file": "case2_masked_gap_patch_embedding.f32",
+      "layer0_output_file": "case2_masked_gap_layer0_output.f32"
+    }
+  ]
+}
