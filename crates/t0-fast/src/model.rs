@@ -245,6 +245,7 @@ impl GpuModel {
 fn linear(
     engine: &Engine,
     encoder: &mut wgpu::CommandEncoder,
+    key: &str,
     x: &wgpu::Buffer,
     rows: u32,
     in_dim: u32,
@@ -253,17 +254,11 @@ fn linear(
     out_dim: u32,
     act: u32,
 ) -> wgpu::Buffer {
-    let out = engine.buf_empty((rows * out_dim) as usize, "linear_out");
-    let dims = engine.buf_uniform(
-        LinearDims {
-            m: rows,
-            k: in_dim,
-            n: out_dim,
-            act,
-        },
-        "linear_dims",
-    );
-    let bg = engine.bind_group(
+    let pool = &engine.pool;
+    let out = pool.data(&format!("{key}.out"), (rows * out_dim) as usize);
+    let dims = pool.uniform(&format!("{key}.dims"), LinearDims { m: rows, k: in_dim, n: out_dim, act });
+    let bg = pool.bind_group(
+        key,
         &engine.linear,
         &[
             BindGroupEntry { binding: 0, resource: x.as_entire_binding() },
@@ -273,13 +268,15 @@ fn linear(
             BindGroupEntry { binding: 4, resource: dims.as_entire_binding() },
         ],
     );
-    engine.dispatch(encoder, &engine.linear, &bg, (out_dim.div_ceil(16), rows.div_ceil(16), 1), "linear");
+    engine.dispatch(encoder, &engine.linear, &bg, (out_dim.div_ceil(16), rows.div_ceil(16), 1), key);
     out
 }
 
-fn add_inplace(engine: &Engine, encoder: &mut wgpu::CommandEncoder, a: &wgpu::Buffer, b: &wgpu::Buffer, len: u32) {
-    let dims = engine.buf_uniform(AddDims { len, _p0: 0, _p1: 0, _p2: 0 }, "add_dims");
-    let bg = engine.bind_group(
+fn add_inplace(engine: &Engine, encoder: &mut wgpu::CommandEncoder, key: &str, a: &wgpu::Buffer, b: &wgpu::Buffer, len: u32) {
+    let pool = &engine.pool;
+    let dims = pool.uniform(&format!("{key}.dims"), AddDims { len, _p0: 0, _p1: 0, _p2: 0 });
+    let bg = pool.bind_group(
+        key,
         &engine.add_inplace,
         &[
             BindGroupEntry { binding: 0, resource: a.as_entire_binding() },
@@ -287,13 +284,15 @@ fn add_inplace(engine: &Engine, encoder: &mut wgpu::CommandEncoder, a: &wgpu::Bu
             BindGroupEntry { binding: 2, resource: dims.as_entire_binding() },
         ],
     );
-    engine.dispatch(encoder, &engine.add_inplace, &bg, (len.div_ceil(256), 1, 1), "add_inplace");
+    engine.dispatch(encoder, &engine.add_inplace, &bg, (len.div_ceil(256), 1, 1), key);
 }
 
-fn rmsnorm_full(engine: &Engine, encoder: &mut wgpu::CommandEncoder, x: &wgpu::Buffer, scale: &wgpu::Buffer, rows: u32, dim: u32) -> wgpu::Buffer {
-    let out = engine.buf_empty((rows * dim) as usize, "rmsnorm_out");
-    let dims = engine.buf_uniform(RmsFullDims { rows, dim, _p0: 0, _p1: 0 }, "rmsnorm_dims");
-    let bg = engine.bind_group(
+fn rmsnorm_full(engine: &Engine, encoder: &mut wgpu::CommandEncoder, key: &str, x: &wgpu::Buffer, scale: &wgpu::Buffer, rows: u32, dim: u32) -> wgpu::Buffer {
+    let pool = &engine.pool;
+    let out = pool.data(&format!("{key}.out"), (rows * dim) as usize);
+    let dims = pool.uniform(&format!("{key}.dims"), RmsFullDims { rows, dim, _p0: 0, _p1: 0 });
+    let bg = pool.bind_group(
+        key,
         &engine.rmsnorm_full,
         &[
             BindGroupEntry { binding: 0, resource: x.as_entire_binding() },
@@ -302,7 +301,7 @@ fn rmsnorm_full(engine: &Engine, encoder: &mut wgpu::CommandEncoder, x: &wgpu::B
             BindGroupEntry { binding: 3, resource: dims.as_entire_binding() },
         ],
     );
-    engine.dispatch(encoder, &engine.rmsnorm_full, &bg, (rows.div_ceil(64), 1, 1), "rmsnorm_full");
+    engine.dispatch(encoder, &engine.rmsnorm_full, &bg, (rows.div_ceil(64), 1, 1), key);
     out
 }
 
@@ -310,6 +309,7 @@ fn rmsnorm_full(engine: &Engine, encoder: &mut wgpu::CommandEncoder, x: &wgpu::B
 fn rmsnorm_qk(
     engine: &Engine,
     encoder: &mut wgpu::CommandEncoder,
+    key: &str,
     buf: &wgpu::Buffer,
     scale: &wgpu::Buffer,
     rows: u32,
@@ -317,20 +317,13 @@ fn rmsnorm_qk(
     base_offset: u32,
     row_stride: u32,
 ) {
-    let dims = engine.buf_uniform(
-        RmsQkDims {
-            rows,
-            heads,
-            head_dim: HEAD_DIM,
-            base_offset,
-            row_stride,
-            _p0: 0,
-            _p1: 0,
-            _p2: 0,
-        },
-        "rmsnorm_qk_dims",
+    let pool = &engine.pool;
+    let dims = pool.uniform(
+        &format!("{key}.dims"),
+        RmsQkDims { rows, heads, head_dim: HEAD_DIM, base_offset, row_stride, _p0: 0, _p1: 0, _p2: 0 },
     );
-    let bg = engine.bind_group(
+    let bg = pool.bind_group(
+        key,
         &engine.rmsnorm_qk,
         &[
             BindGroupEntry { binding: 0, resource: buf.as_entire_binding() },
@@ -338,13 +331,14 @@ fn rmsnorm_qk(
             BindGroupEntry { binding: 2, resource: dims.as_entire_binding() },
         ],
     );
-    engine.dispatch(encoder, &engine.rmsnorm_qk, &bg, ((rows * heads).div_ceil(64), 1, 1), "rmsnorm_qk");
+    engine.dispatch(encoder, &engine.rmsnorm_qk, &bg, ((rows * heads).div_ceil(64), 1, 1), key);
 }
 
 #[allow(clippy::too_many_arguments)]
 fn rope(
     engine: &Engine,
     encoder: &mut wgpu::CommandEncoder,
+    key: &str,
     buf: &wgpu::Buffer,
     cos: &wgpu::Buffer,
     sin: &wgpu::Buffer,
@@ -355,20 +349,13 @@ fn rope(
     row_stride: u32,
     seq_len: u32,
 ) {
-    let dims = engine.buf_uniform(
-        RopeDims {
-            rows,
-            heads,
-            head_dim: HEAD_DIM,
-            base_offset,
-            row_stride,
-            seq_len,
-            _p0: 0,
-            _p1: 0,
-        },
-        "rope_dims",
+    let pool = &engine.pool;
+    let dims = pool.uniform(
+        &format!("{key}.dims"),
+        RopeDims { rows, heads, head_dim: HEAD_DIM, base_offset, row_stride, seq_len, _p0: 0, _p1: 0 },
     );
-    let bg = engine.bind_group(
+    let bg = pool.bind_group(
+        key,
         &engine.rope,
         &[
             BindGroupEntry { binding: 0, resource: buf.as_entire_binding() },
@@ -379,24 +366,23 @@ fn rope(
         ],
     );
     let half = HEAD_DIM / 2;
-    engine.dispatch(encoder, &engine.rope, &bg, ((rows * heads * half).div_ceil(64), 1, 1), "rope");
+    engine.dispatch(encoder, &engine.rope, &bg, ((rows * heads * half).div_ceil(64), 1, 1), key);
 }
 
+/// `seq` (patch count for time layers, variate-chunk size for group layers)
+/// is capped by `MAX_SEQ` in `attention.wgsl` (128 -- comfortably above the
+/// model's real max of 32 patches at `max_horizon=1024`/`patch_size=32`,
+/// and above any realistic batch-chunk variate count). One kernel, one
+/// code path regardless of `seq`; this assert only catches a config this
+/// crate has never been exercised against.
 #[allow(clippy::too_many_arguments)]
-fn attention(
-    engine: &Engine,
-    encoder: &mut wgpu::CommandEncoder,
-    qkv: &wgpu::Buffer,
-    mask: &wgpu::Buffer,
-    outer: u32,
-    seq: u32,
-    heads: u32,
-    embed: u32,
-) -> wgpu::Buffer {
-    assert!(seq <= 64, "t0-fast Phase A attention kernel caps seq_len at 64 (MAX_SEQ in attention.wgsl), got {seq}");
+fn attention(engine: &Engine, encoder: &mut wgpu::CommandEncoder, key: &str, qkv: &wgpu::Buffer, mask: &wgpu::Buffer, outer: u32, seq: u32, heads: u32, embed: u32) -> wgpu::Buffer {
+    debug_assert!(seq <= 128, "seq_len {seq} exceeds MAX_SEQ=128 in attention.wgsl");
+    let pool = &engine.pool;
     let qkv_stride = 3 * embed;
-    let out = engine.buf_empty((outer * seq * embed) as usize, "attn_out");
-    let dims = engine.buf_uniform(
+    let out = pool.data(&format!("{key}.out"), (outer * seq * embed) as usize);
+    let dims = pool.uniform(
+        &format!("{key}.dims"),
         AttnDims {
             outer,
             seq,
@@ -407,9 +393,9 @@ fn attention(
             scale: 1.0 / (HEAD_DIM as f32).sqrt(),
             _p0: 0,
         },
-        "attn_dims",
     );
-    let bg = engine.bind_group(
+    let bg = pool.bind_group(
+        key,
         &engine.attention,
         &[
             BindGroupEntry { binding: 0, resource: qkv.as_entire_binding() },
@@ -418,14 +404,16 @@ fn attention(
             BindGroupEntry { binding: 3, resource: dims.as_entire_binding() },
         ],
     );
-    engine.dispatch(encoder, &engine.attention, &bg, (outer * heads, 1, 1), "attention");
+    engine.dispatch(encoder, &engine.attention, &bg, (outer * heads, 1, 1), key);
     out
 }
 
-fn transpose_outer(engine: &Engine, encoder: &mut wgpu::CommandEncoder, src: &wgpu::Buffer, a: u32, b: u32, e: u32) -> wgpu::Buffer {
-    let dst = engine.buf_empty((a * b * e) as usize, "transpose_out");
-    let dims = engine.buf_uniform(TransposeDims { a, b, e, _p0: 0 }, "transpose_dims");
-    let bg = engine.bind_group(
+fn transpose_outer(engine: &Engine, encoder: &mut wgpu::CommandEncoder, key: &str, src: &wgpu::Buffer, a: u32, b: u32, e: u32) -> wgpu::Buffer {
+    let pool = &engine.pool;
+    let dst = pool.data(&format!("{key}.out"), (a * b * e) as usize);
+    let dims = pool.uniform(&format!("{key}.dims"), TransposeDims { a, b, e, _p0: 0 });
+    let bg = pool.bind_group(
+        key,
         &engine.transpose_outer,
         &[
             BindGroupEntry { binding: 0, resource: src.as_entire_binding() },
@@ -433,14 +421,16 @@ fn transpose_outer(engine: &Engine, encoder: &mut wgpu::CommandEncoder, src: &wg
             BindGroupEntry { binding: 2, resource: dims.as_entire_binding() },
         ],
     );
-    engine.dispatch(encoder, &engine.transpose_outer, &bg, ((a * b).div_ceil(64), 1, 1), "transpose_outer");
+    engine.dispatch(encoder, &engine.transpose_outer, &bg, ((a * b).div_ceil(64), 1, 1), key);
     dst
 }
 
-fn silu_mul(engine: &Engine, encoder: &mut wgpu::CommandEncoder, src: &wgpu::Buffer, rows: u32, hidden: u32) -> wgpu::Buffer {
-    let out = engine.buf_empty((rows * hidden) as usize, "silu_out");
-    let dims = engine.buf_uniform(SiluDims { rows, hidden, _p0: 0, _p1: 0 }, "silu_dims");
-    let bg = engine.bind_group(
+fn silu_mul(engine: &Engine, encoder: &mut wgpu::CommandEncoder, key: &str, src: &wgpu::Buffer, rows: u32, hidden: u32) -> wgpu::Buffer {
+    let pool = &engine.pool;
+    let out = pool.data(&format!("{key}.out"), (rows * hidden) as usize);
+    let dims = pool.uniform(&format!("{key}.dims"), SiluDims { rows, hidden, _p0: 0, _p1: 0 });
+    let bg = pool.bind_group(
+        key,
         &engine.silu_mul,
         &[
             BindGroupEntry { binding: 0, resource: src.as_entire_binding() },
@@ -448,15 +438,15 @@ fn silu_mul(engine: &Engine, encoder: &mut wgpu::CommandEncoder, src: &wgpu::Buf
             BindGroupEntry { binding: 2, resource: dims.as_entire_binding() },
         ],
     );
-    engine.dispatch(encoder, &engine.silu_mul, &bg, ((rows * hidden).div_ceil(256), 1, 1), "silu_mul");
+    engine.dispatch(encoder, &engine.silu_mul, &bg, ((rows * hidden).div_ceil(256), 1, 1), key);
     out
 }
 
-fn residual_block(engine: &Engine, encoder: &mut wgpu::CommandEncoder, x: &wgpu::Buffer, rows: u32, w: &ResidualBlockBuf) -> wgpu::Buffer {
-    let hidden = linear(engine, encoder, x, rows, w.in_dim, &w.hidden_w, &w.hidden_b, w.hidden_dim, 1);
-    let out = linear(engine, encoder, &hidden, rows, w.hidden_dim, &w.output_w, &w.output_b, w.out_dim, 0);
-    let residual = linear(engine, encoder, x, rows, w.in_dim, &w.residual_w, &w.residual_b, w.out_dim, 0);
-    add_inplace(engine, encoder, &out, &residual, rows * w.out_dim);
+fn residual_block(engine: &Engine, encoder: &mut wgpu::CommandEncoder, key: &str, x: &wgpu::Buffer, rows: u32, w: &ResidualBlockBuf) -> wgpu::Buffer {
+    let hidden = linear(engine, encoder, &format!("{key}.hidden"), x, rows, w.in_dim, &w.hidden_w, &w.hidden_b, w.hidden_dim, 1);
+    let out = linear(engine, encoder, &format!("{key}.out"), &hidden, rows, w.hidden_dim, &w.output_w, &w.output_b, w.out_dim, 0);
+    let residual = linear(engine, encoder, &format!("{key}.residual"), x, rows, w.in_dim, &w.residual_w, &w.residual_b, w.out_dim, 0);
+    add_inplace(engine, encoder, &format!("{key}.add"), &out, &residual, rows * w.out_dim);
     out
 }
 
@@ -502,13 +492,15 @@ pub async fn forward_async(engine: &Engine, model: &GpuModel, series: &TimeSerie
     let rope_tables = RopeTables::new(p as usize, HEAD_DIM as usize);
 
     let mut encoder = engine.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("t0-fast forward") });
+    let pool = &engine.pool;
 
-    let concat_buf = engine.buf_f32(&concat, "concat");
-    let x = residual_block(engine, &mut encoder, &concat_buf, rows, &model.patch_encoder);
+    let concat_buf = pool.upload_f32("concat", &concat);
+    let x = residual_block(engine, &mut encoder, "patch_enc", &concat_buf, rows, &model.patch_encoder);
 
-    let idx_buf = engine.buf_u32(&type_idx, "type_idx");
-    let gather_dims = engine.buf_uniform(GatherDims { rows, embed, _p0: 0, _p1: 0 }, "gather_dims");
-    let gather_bg = engine.bind_group(
+    let idx_buf = pool.upload_u32("type_idx", &type_idx);
+    let gather_dims = pool.uniform("gather.dims", GatherDims { rows, embed, _p0: 0, _p1: 0 });
+    let gather_bg = pool.bind_group(
+        "gather",
         &engine.gather_add,
         &[
             BindGroupEntry { binding: 0, resource: x.as_entire_binding() },
@@ -517,55 +509,57 @@ pub async fn forward_async(engine: &Engine, model: &GpuModel, series: &TimeSerie
             BindGroupEntry { binding: 3, resource: gather_dims.as_entire_binding() },
         ],
     );
-    engine.dispatch(&mut encoder, &engine.gather_add, &gather_bg, ((rows * embed).div_ceil(256), 1, 1), "gather_add");
+    engine.dispatch(&mut encoder, &engine.gather_add, &gather_bg, ((rows * embed).div_ceil(256), 1, 1), "gather");
 
-    let time_mask_buf = engine.buf_f32(&time_mask_flat, "time_mask");
-    let group_mask_buf = engine.buf_f32(&group_mask_flat, "group_mask");
-    let cos_buf = engine.buf_f32(&rope_tables.cos, "rope_cos");
-    let sin_buf = engine.buf_f32(&rope_tables.sin, "rope_sin");
-    let scale_buf = engine.buf_f32(&rope_tables.scale, "rope_scale");
-    let scale_inv_buf = engine.buf_f32(&rope_tables.scale_inv, "rope_scale_inv");
+    let time_mask_buf = pool.upload_f32("time_mask", &time_mask_flat);
+    let group_mask_buf = pool.upload_f32("group_mask", &group_mask_flat);
+    let cos_buf = pool.upload_f32("rope_cos", &rope_tables.cos);
+    let sin_buf = pool.upload_f32("rope_sin", &rope_tables.sin);
+    let scale_buf = pool.upload_f32("rope_scale", &rope_tables.scale);
+    let scale_inv_buf = pool.upload_f32("rope_scale_inv", &rope_tables.scale_inv);
 
-    for layer in &model.layers {
-        let normed = rmsnorm_full(engine, &mut encoder, &x, &layer.norm_scale, rows, embed);
+    for (i, layer) in model.layers.iter().enumerate() {
+        let lk = |s: &str| format!("layer{i}.{s}");
+        let normed = rmsnorm_full(engine, &mut encoder, &lk("norm"), &x, &layer.norm_scale, rows, embed);
 
         let attn_out = match layer.ty {
             LayerType::Time => {
-                let qkv = linear(engine, &mut encoder, &normed, rows, embed, &layer.w_qkv, &layer.b_qkv, 3 * embed, 0);
-                rmsnorm_qk(engine, &mut encoder, &qkv, &layer.q_norm, rows, heads, 0, 3 * embed);
-                rmsnorm_qk(engine, &mut encoder, &qkv, &layer.k_norm, rows, heads, embed, 3 * embed);
-                rope(engine, &mut encoder, &qkv, &cos_buf, &sin_buf, &scale_buf, rows, heads, 0, 3 * embed, p);
-                rope(engine, &mut encoder, &qkv, &cos_buf, &sin_buf, &scale_inv_buf, rows, heads, embed, 3 * embed, p);
-                let attn_pre = attention(engine, &mut encoder, &qkv, &time_mask_buf, v, p, heads, embed);
-                linear(engine, &mut encoder, &attn_pre, rows, embed, &layer.w_o, &layer.b_o, embed, 0)
+                let qkv = linear(engine, &mut encoder, &lk("qkv"), &normed, rows, embed, &layer.w_qkv, &layer.b_qkv, 3 * embed, 0);
+                rmsnorm_qk(engine, &mut encoder, &lk("qnorm"), &qkv, &layer.q_norm, rows, heads, 0, 3 * embed);
+                rmsnorm_qk(engine, &mut encoder, &lk("knorm"), &qkv, &layer.k_norm, rows, heads, embed, 3 * embed);
+                rope(engine, &mut encoder, &lk("ropeq"), &qkv, &cos_buf, &sin_buf, &scale_buf, rows, heads, 0, 3 * embed, p);
+                rope(engine, &mut encoder, &lk("ropek"), &qkv, &cos_buf, &sin_buf, &scale_inv_buf, rows, heads, embed, 3 * embed, p);
+                let attn_pre = attention(engine, &mut encoder, &lk("attn"), &qkv, &time_mask_buf, v, p, heads, embed);
+                linear(engine, &mut encoder, &lk("wo"), &attn_pre, rows, embed, &layer.w_o, &layer.b_o, embed, 0)
             }
             LayerType::Group => {
-                let normed_t = transpose_outer(engine, &mut encoder, &normed, v, p, embed);
-                let qkv = linear(engine, &mut encoder, &normed_t, rows, embed, &layer.w_qkv, &layer.b_qkv, 3 * embed, 0);
-                rmsnorm_qk(engine, &mut encoder, &qkv, &layer.q_norm, rows, heads, 0, 3 * embed);
-                rmsnorm_qk(engine, &mut encoder, &qkv, &layer.k_norm, rows, heads, embed, 3 * embed);
-                let attn_pre = attention(engine, &mut encoder, &qkv, &group_mask_buf, p, v, heads, embed);
-                let attn_out_t = linear(engine, &mut encoder, &attn_pre, rows, embed, &layer.w_o, &layer.b_o, embed, 0);
-                transpose_outer(engine, &mut encoder, &attn_out_t, p, v, embed)
+                let normed_t = transpose_outer(engine, &mut encoder, &lk("tr1"), &normed, v, p, embed);
+                let qkv = linear(engine, &mut encoder, &lk("qkv"), &normed_t, rows, embed, &layer.w_qkv, &layer.b_qkv, 3 * embed, 0);
+                rmsnorm_qk(engine, &mut encoder, &lk("qnorm"), &qkv, &layer.q_norm, rows, heads, 0, 3 * embed);
+                rmsnorm_qk(engine, &mut encoder, &lk("knorm"), &qkv, &layer.k_norm, rows, heads, embed, 3 * embed);
+                let attn_pre = attention(engine, &mut encoder, &lk("attn"), &qkv, &group_mask_buf, p, v, heads, embed);
+                let attn_out_t = linear(engine, &mut encoder, &lk("wo"), &attn_pre, rows, embed, &layer.w_o, &layer.b_o, embed, 0);
+                transpose_outer(engine, &mut encoder, &lk("tr2"), &attn_out_t, p, v, embed)
             }
         };
-        add_inplace(engine, &mut encoder, &x, &attn_out, rows * embed);
+        add_inplace(engine, &mut encoder, &lk("add1"), &x, &attn_out, rows * embed);
 
-        let mlp_normed = rmsnorm_full(engine, &mut encoder, &x, &layer.mlp_norm_scale, rows, embed);
-        let w0_out = linear(engine, &mut encoder, &mlp_normed, rows, embed, &layer.w0, &layer.b0, 2 * layer.mlp_hidden, 0);
-        let gated = silu_mul(engine, &mut encoder, &w0_out, rows, layer.mlp_hidden);
-        let mlp_out = linear(engine, &mut encoder, &gated, rows, layer.mlp_hidden, &layer.w2, &layer.b2, embed, 0);
-        add_inplace(engine, &mut encoder, &x, &mlp_out, rows * embed);
+        let mlp_normed = rmsnorm_full(engine, &mut encoder, &lk("mlpnorm"), &x, &layer.mlp_norm_scale, rows, embed);
+        let w0_out = linear(engine, &mut encoder, &lk("w0"), &mlp_normed, rows, embed, &layer.w0, &layer.b0, 2 * layer.mlp_hidden, 0);
+        let gated = silu_mul(engine, &mut encoder, &lk("silu"), &w0_out, rows, layer.mlp_hidden);
+        let mlp_out = linear(engine, &mut encoder, &lk("w2"), &gated, rows, layer.mlp_hidden, &layer.w2, &layer.b2, embed, 0);
+        add_inplace(engine, &mut encoder, &lk("add2"), &x, &mlp_out, rows * embed);
     }
 
-    let normed_final = rmsnorm_full(engine, &mut encoder, &x, &model.out_norm_scale, rows, embed);
-    let decoded = residual_block(engine, &mut encoder, &normed_final, rows, &model.decoder); // [rows, patch_size*n_q]
+    let normed_final = rmsnorm_full(engine, &mut encoder, "out_norm", &x, &model.out_norm_scale, rows, embed);
+    let decoded = residual_block(engine, &mut encoder, "decoder", &normed_final, rows, &model.decoder); // [rows, patch_size*n_q]
 
     let n_q = cfg.n_quantiles() as u32;
     let quantile_rows = rows * patch_size;
-    let q_dims = engine.buf_uniform(QuantileDims { rows: quantile_rows, n_q, _p0: 0, _p1: 0 }, "quantile_dims");
-    let out_buf = engine.buf_empty((quantile_rows * n_q) as usize, "quantile_out");
-    let q_bg = engine.bind_group(
+    let q_dims = pool.uniform("quantile.dims", QuantileDims { rows: quantile_rows, n_q, _p0: 0, _p1: 0 });
+    let out_buf = pool.data("quantile.out", (quantile_rows * n_q) as usize);
+    let q_bg = pool.bind_group(
+        "quantile",
         &engine.quantile_head,
         &[
             BindGroupEntry { binding: 0, resource: decoded.as_entire_binding() },
@@ -573,7 +567,7 @@ pub async fn forward_async(engine: &Engine, model: &GpuModel, series: &TimeSerie
             BindGroupEntry { binding: 2, resource: q_dims.as_entire_binding() },
         ],
     );
-    engine.dispatch(&mut encoder, &engine.quantile_head, &q_bg, (quantile_rows.div_ceil(64), 1, 1), "quantile_head");
+    engine.dispatch(&mut encoder, &engine.quantile_head, &q_bg, (quantile_rows.div_ceil(64), 1, 1), "quantile");
 
     engine.queue.submit(Some(encoder.finish()));
     Ok(engine.read_buffer(&out_buf, (quantile_rows * n_q) as usize).await)
