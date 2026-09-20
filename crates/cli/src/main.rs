@@ -402,21 +402,45 @@ fn quantizable_f32_bytes(weights: &Weights, config: &T0Config) -> Result<u64> {
 #[cfg(feature = "fast")]
 fn cmd_parity_fast(fixtures_dir: &Path, weights_path: &Path, config_path: Option<&Path>, fast_quant: &str) -> Result<()> {
     let manifest: Manifest = serde_json::from_str(&std::fs::read_to_string(fixtures_dir.join("manifest.json"))?)?;
-    let (weights, config) = Weights::load_auto(weights_path, config_path)?;
-    let quant = t0_fast::WeightQuant::parse(fast_quant)?;
-    let f32_bytes = quantizable_f32_bytes(&weights, &config)?;
+    let is_gguf = weights_path.extension().and_then(|e| e.to_str()) == Some("gguf");
     let engine = t0_fast::Engine::new()?;
-    let model = t0_fast::load_model(&engine, &weights, config.clone(), quant)?;
-    println!(
-        "fast_quant={fast_quant} quantizable_f32_bytes={f32_bytes} quantizable_gpu_bytes={} ratio={:.3}",
-        model.quantizable_gpu_bytes(),
-        model.quantizable_gpu_bytes() as f64 / f32_bytes as f64
-    );
+
+    // Two distinct load paths: a `.gguf` weights file goes straight through
+    // `load_model_from_gguf` (block bytes -> GPU buffer, no f32-expanded
+    // copy anywhere -- the browser's actual load path per
+    // docs/runs/2026-09-20-perf.md's Phase B-web item), everything else
+    // (safetensors) goes through the existing f32-in-memory + on-the-fly
+    // requantize path this command already had.
+    let (weights_opt, config, model) = if is_gguf {
+        let bytes = std::fs::read(weights_path)?;
+        let model = t0_fast::load_model_from_gguf(&engine, &bytes)?;
+        let config = model.config.clone();
+        (None, config, model)
+    } else {
+        let (weights, config) = Weights::load_auto(weights_path, config_path)?;
+        let quant = t0_fast::WeightQuant::parse(fast_quant)?;
+        let model = t0_fast::load_model(&engine, &weights, config.clone(), quant)?;
+        (Some(weights), config, model)
+    };
+    if let Some(weights) = &weights_opt {
+        let f32_bytes = quantizable_f32_bytes(weights, &config)?;
+        println!(
+            "fast_quant={fast_quant} quantizable_f32_bytes={f32_bytes} quantizable_gpu_bytes={} ratio={:.3}",
+            model.quantizable_gpu_bytes(),
+            model.quantizable_gpu_bytes() as f64 / f32_bytes as f64
+        );
+    } else {
+        println!("gguf_resident=true quantizable_gpu_bytes={}", model.quantizable_gpu_bytes());
+    }
 
     #[cfg(feature = "ndarray")]
-    let burn_reference: Option<T0Model<Backend>> = if fast_quant == "f32" {
+    let burn_reference: Option<T0Model<Backend>> = if fast_quant == "f32" && !is_gguf {
         None
+    } else if is_gguf {
+        let (roundtripped, rt_config) = Weights::load_gguf(weights_path)?;
+        Some(T0Model::load(&roundtripped, rt_config, &device())?)
     } else {
+        let weights = weights_opt.as_ref().expect("safetensors path always has weights");
         let core_quant = Quant::parse(fast_quant)?;
         let gguf_path = std::env::temp_dir().join(format!("t0_fast_parity_{fast_quant}.gguf"));
         weights.export_gguf(&config, core_quant, &gguf_path)?;
@@ -443,7 +467,7 @@ fn cmd_parity_fast(fixtures_dir: &Path, weights_path: &Path, config_path: Option
         worst = worst.max(q_abs);
     }
     println!("worst quantile max-abs error across fixtures: {worst:.6e}");
-    if fast_quant == "f32" {
+    if fast_quant == "f32" && !is_gguf {
         if worst > 1e-4 {
             return Err(anyhow!("parity gate failed: max-abs error {worst:.6e} exceeds 1e-4"));
         }
@@ -463,11 +487,17 @@ fn cmd_parity_fast(fixtures_dir: &Path, weights_path: &Path, config_path: Option
 #[allow(clippy::too_many_arguments)]
 fn cmd_bench_fast(weights_path: &Path, config_path: Option<&Path>, n_signals: usize, t_ctx: usize, horizon: usize, reps: usize, warmup: usize, fast_quant: &str, chunk: usize) -> Result<()> {
     let file_size = std::fs::metadata(weights_path)?.len();
-    let quant = t0_fast::WeightQuant::parse(fast_quant)?;
-    let t0 = Instant::now();
-    let (weights, config) = Weights::load_auto(weights_path, config_path)?;
+    let is_gguf = weights_path.extension().and_then(|e| e.to_str()) == Some("gguf");
     let engine = t0_fast::Engine::new()?;
-    let model = t0_fast::load_model(&engine, &weights, config, quant)?;
+    let t0 = Instant::now();
+    let model = if is_gguf {
+        let bytes = std::fs::read(weights_path)?;
+        t0_fast::load_model_from_gguf(&engine, &bytes)?
+    } else {
+        let quant = t0_fast::WeightQuant::parse(fast_quant)?;
+        let (weights, config) = Weights::load_auto(weights_path, config_path)?;
+        t0_fast::load_model(&engine, &weights, config, quant)?
+    };
     let load_time = t0.elapsed();
     let quantizable_gpu_bytes = model.quantizable_gpu_bytes();
     let context = synthetic_sines(n_signals, t_ctx);

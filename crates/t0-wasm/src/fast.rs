@@ -47,21 +47,32 @@ pub struct T0Wasm {
 impl T0Wasm {
     /// Parses a GGUF byte buffer (as exported by `t0-cli export-gguf`) and
     /// uploads every tensor straight to `wgpu::Buffer`s -- no Burn tensor
-    /// at any point. `--fast-quant` isn't exposed here yet: this always
-    /// loads F32-resident weights (see `docs/runs/2026-09-20-perf.md`'s
-    /// Phase C note on wiring Q8_0/Q4_0 through to the wasm surface as a
-    /// follow-up).
+    /// at any point, and no F32-expanded copy of the big per-layer matmuls
+    /// either: `load_model_from_gguf` keeps their Q8_0/Q4_0 block bytes
+    /// exactly as they arrive off the wire (the page already downloads a
+    /// quantized GGUF), reading straight into the packed-u32/scale buffers
+    /// the dequant kernels use. Only the small always-F16-on-disk tensors
+    /// (patch encoder, decoder, norms, type embeddings) get dequantized to
+    /// f32 here, same as the Burn path.
     #[wasm_bindgen]
     pub fn load(gguf_bytes: &[u8]) -> Result<T0Wasm, JsValue> {
         console_error_panic_hook::set_once();
-        let (weights, config) = t0_core::Weights::load_gguf_bytes(gguf_bytes).map_err(to_js_err)?;
-        let model = t0_fast::load_model(&engine(), &weights, config, t0_fast::WeightQuant::F32).map_err(to_js_err)?;
+        let model = t0_fast::load_model_from_gguf(&engine(), gguf_bytes).map_err(to_js_err)?;
         Ok(T0Wasm { model })
     }
 
     #[wasm_bindgen(js_name = nQuantiles)]
     pub fn n_quantiles(&self) -> usize {
         self.model.config.n_quantiles()
+    }
+
+    /// Sum of every GPU buffer this instance holds: persistent weights
+    /// (`GpuModel::total_weight_bytes`) plus the per-forward `Pool`
+    /// working set (`Engine::pool::resident_bytes`, 0 before the first
+    /// `forecast`/`forecastBatch` call). For the browser GPU-memory report.
+    #[wasm_bindgen(js_name = gpuBytes)]
+    pub fn gpu_bytes(&self) -> f64 {
+        (self.model.total_weight_bytes() + engine().pool.resident_bytes()) as f64
     }
 
     /// One forward pass, one signal (`v = 1`). Same contract as the Burn

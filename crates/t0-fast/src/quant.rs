@@ -8,7 +8,7 @@
 //! f16), and the quantized values packed 4/u32 so WGSL can read them as
 //! `array<u32>` without a byte-addressed storage buffer.
 
-use t0_core::gguf::{quantize_q4_0, quantize_q8_0};
+use t0_core::gguf::{dequantize_for, quantize_q4_0, quantize_q8_0, GgmlType};
 
 use crate::engine::Engine;
 
@@ -82,6 +82,44 @@ fn split_q4_blocks(bytes: &[u8], n_elements: usize) -> (Vec<u32>, Vec<f32>) {
         }
     }
     (qs, scales)
+}
+
+/// Same as `load_matmul_weight`, but for a tensor read straight out of a
+/// GGUF file (`ty`/`bytes` from `t0_core::gguf::read_gguf`'s `GgufFile::tensors`):
+/// if it's already Q8_0/Q4_0 on disk, its block bytes go straight into
+/// `split_q8_blocks`/`split_q4_blocks` -- no dequantize-then-requantize
+/// round trip, and no F32-expanded copy of the weight ever exists in
+/// memory (the two-phase-loading point of this function: the GGUF reader's
+/// `Vec<u8>` for this tensor can be dropped right after this call). F32/F16
+/// on disk (small tensors, or a `--quant f16` export) still dequantizes to
+/// f32 -- there's no lower-precision GPU compute path for those today.
+pub fn load_matmul_weight_gguf(engine: &Engine, label: &str, shape: &[usize], ty: GgmlType, bytes: &[u8]) -> MatMulWeight {
+    let in_dim = shape[1];
+    match ty {
+        GgmlType::Q8_0 => {
+            let n_elements: usize = shape.iter().product();
+            let (qs, scales) = split_q8_blocks(bytes, n_elements);
+            MatMulWeight::Q8_0 {
+                qs: engine.buf_u32(&qs, &format!("{label}.qs")),
+                scales: engine.buf_f32(&scales, &format!("{label}.scales")),
+                blocks_per_row: (in_dim / QK) as u32,
+            }
+        }
+        GgmlType::Q4_0 => {
+            let n_elements: usize = shape.iter().product();
+            let (qs, scales) = split_q4_blocks(bytes, n_elements);
+            MatMulWeight::Q4_0 {
+                qs: engine.buf_u32(&qs, &format!("{label}.qs")),
+                scales: engine.buf_f32(&scales, &format!("{label}.scales")),
+                blocks_per_row: (in_dim / QK) as u32,
+            }
+        }
+        GgmlType::F32 | GgmlType::F16 => {
+            let n_elements: usize = shape.iter().product();
+            let data = dequantize_for(ty, bytes, n_elements);
+            MatMulWeight::F32 { w: engine.buf_f32(&data, label) }
+        }
+    }
 }
 
 /// Loads one big matmul weight (`shape = [out_dim, in_dim]`, PyTorch

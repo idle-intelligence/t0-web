@@ -7,7 +7,7 @@
 //! the causal scaler, RoPE table math) is reused as-is from `t0_core` --
 //! none of that touches a GPU buffer until the single upload per input.
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use bytemuck::{Pod, Zeroable};
 use wgpu::BindGroupEntry;
 
@@ -17,10 +17,11 @@ use t0_core::mask::{build_group_mask, build_time_mask, patch_attendable, reduce_
 use t0_core::{T0Config, Weights};
 
 use crate::engine::Engine;
-use crate::quant::{load_matmul_weight, MatMulWeight, WeightQuant};
+use crate::quant::{load_matmul_weight, load_matmul_weight_gguf, MatMulWeight, WeightQuant};
 use crate::rope_tables::RopeTables;
 
 const HEAD_DIM: u32 = 64;
+const TILED_THRESHOLD_ROWS: u32 = 32;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -186,6 +187,32 @@ impl GpuModel {
             .map(|l| l.w_qkv.gpu_bytes() + l.w_o.gpu_bytes() + l.w0.gpu_bytes() + l.w2.gpu_bytes())
             .sum()
     }
+
+    fn residual_block_bytes(w: &ResidualBlockBuf) -> u64 {
+        w.hidden_w.size() + w.hidden_b.size() + w.output_w.size() + w.output_b.size() + w.residual_w.size() + w.residual_b.size()
+    }
+
+    /// Every persistent GPU buffer this model holds (weights only -- not
+    /// the per-forward `Pool` working set, see `Engine::pool`'s
+    /// `resident_bytes`). The GPU-memory report a browser page can show.
+    pub fn total_weight_bytes(&self) -> u64 {
+        let mut total = Self::residual_block_bytes(&self.patch_encoder) + self.type_embeddings.size() + self.out_norm_scale.size() + Self::residual_block_bytes(&self.decoder);
+        for l in &self.layers {
+            total += l.norm_scale.size()
+                + l.b_qkv.size()
+                + l.b_o.size()
+                + l.q_norm.size()
+                + l.k_norm.size()
+                + l.mlp_norm_scale.size()
+                + l.b0.size()
+                + l.b2.size()
+                + l.w_qkv.gpu_bytes()
+                + l.w_o.gpu_bytes()
+                + l.w0.gpu_bytes()
+                + l.w2.gpu_bytes();
+        }
+        total
+    }
 }
 
 fn load_residual_block(engine: &Engine, weights: &Weights, prefix: &str) -> Result<ResidualBlockBuf> {
@@ -213,7 +240,103 @@ fn load_residual_block(engine: &Engine, weights: &Weights, prefix: &str) -> Resu
     })
 }
 
+type GgufTensors = std::collections::HashMap<String, (Vec<usize>, t0_core::gguf::GgmlType, Vec<u8>)>;
+
+fn gguf_get<'a>(tensors: &'a GgufTensors, name: &str) -> Result<&'a (Vec<usize>, t0_core::gguf::GgmlType, Vec<u8>)> {
+    tensors.get(name).ok_or_else(|| anyhow!("gguf: missing tensor {name}"))
+}
+
+fn gguf_f32(engine: &Engine, tensors: &GgufTensors, name: &str) -> Result<wgpu::Buffer> {
+    let (shape, ty, bytes) = gguf_get(tensors, name)?;
+    let n: usize = shape.iter().product();
+    let data = t0_core::gguf::dequantize_for(*ty, bytes, n);
+    Ok(engine.buf_f32(&data, name))
+}
+
+/// Same as `load_residual_block`, but for tensors read straight out of a
+/// GGUF file: the patch encoder/decoder are never quantized (see
+/// `t0_core::weights::is_quantizable`), so this always dequantizes to f32,
+/// same as the small per-layer tensors in `load_from_gguf_bytes` below.
+fn load_residual_block_gguf(engine: &Engine, tensors: &GgufTensors, prefix: &str) -> Result<ResidualBlockBuf> {
+    let (hw_shape, _, _) = gguf_get(tensors, &format!("{prefix}.mlp.hidden_layer.weight"))?;
+    let in_dim = hw_shape[1] as u32;
+    let hidden_dim = hw_shape[0] as u32;
+    let (ow_shape, _, _) = gguf_get(tensors, &format!("{prefix}.mlp.output_layer.weight"))?;
+    let out_dim = ow_shape[0] as u32;
+    Ok(ResidualBlockBuf {
+        hidden_w: gguf_f32(engine, tensors, &format!("{prefix}.mlp.hidden_layer.weight"))?,
+        hidden_b: gguf_f32(engine, tensors, &format!("{prefix}.mlp.hidden_layer.bias"))?,
+        output_w: gguf_f32(engine, tensors, &format!("{prefix}.mlp.output_layer.weight"))?,
+        output_b: gguf_f32(engine, tensors, &format!("{prefix}.mlp.output_layer.bias"))?,
+        residual_w: gguf_f32(engine, tensors, &format!("{prefix}.residual_layer.weight"))?,
+        residual_b: gguf_f32(engine, tensors, &format!("{prefix}.residual_layer.bias"))?,
+        in_dim,
+        hidden_dim,
+        out_dim,
+    })
+}
+
 impl GpuModel {
+    /// Loads a `t0-cli export-gguf` file with the big per-layer matmuls
+    /// (wQKV/wO/mlp.0/mlp.2) kept resident at whatever quantization the
+    /// GGUF already has (Q8_0/Q4_0) -- no dequantize-then-requantize round
+    /// trip, and no F32-expanded copy of those tensors is ever built (the
+    /// two-phase-loading point: `t0_core::gguf::read_gguf`'s `Vec<u8>` per
+    /// tensor is consumed tensor-by-tensor and dropped as this function
+    /// returns, never held alongside the GPU-resident copy). Everything
+    /// else (patch encoder, decoder, norms, type embeddings) is F16 on
+    /// disk regardless of `--quant` and is dequantized to f32 here, same
+    /// as `Weights::load_gguf_bytes` -- those tensors are tiny and always
+    /// F32-resident on the GPU (see `load`'s doc comment / `docs/reports/
+    /// t0-alpha.md` §5 on why: they gate output precision, not worth
+    /// quantizing).
+    pub fn load_from_gguf_bytes(engine: &Engine, gguf_bytes: &[u8]) -> Result<Self> {
+        let file = t0_core::gguf::read_gguf(&mut &gguf_bytes[..]).context("parsing gguf")?;
+        let config = t0_core::weights::config_from_gguf_metadata(&file.metadata)?;
+        let tensors = &file.tensors;
+
+        let patch_encoder = load_residual_block_gguf(engine, tensors, "patch_encoder.projection")?;
+        let type_embeddings = gguf_f32(engine, tensors, "patch_encoder.type_embeddings.weight")?;
+
+        let mut layers = Vec::with_capacity(config.num_layers);
+        for (i, ty) in config.layer_types().into_iter().enumerate() {
+            let p = format!("transformer.layers.{i}");
+            let (w_qkv_shape, w_qkv_ty, w_qkv_bytes) = gguf_get(tensors, &format!("{p}.attention_block.attention.wQKV.weight"))?;
+            let (w_o_shape, w_o_ty, w_o_bytes) = gguf_get(tensors, &format!("{p}.attention_block.attention.wO.weight"))?;
+            let (w0_shape, w0_ty, w0_bytes) = gguf_get(tensors, &format!("{p}.mlp.0.weight"))?;
+            let (w2_shape, w2_ty, w2_bytes) = gguf_get(tensors, &format!("{p}.mlp.2.weight"))?;
+            let mlp_hidden = (w0_shape[0] / 2) as u32;
+            layers.push(LayerBuf {
+                ty,
+                norm_scale: gguf_f32(engine, tensors, &format!("{p}.attention_block.norm.scale"))?,
+                w_qkv: load_matmul_weight_gguf(engine, "w_qkv", w_qkv_shape, *w_qkv_ty, w_qkv_bytes),
+                b_qkv: gguf_f32(engine, tensors, &format!("{p}.attention_block.attention.wQKV.bias"))?,
+                w_o: load_matmul_weight_gguf(engine, "w_o", w_o_shape, *w_o_ty, w_o_bytes),
+                b_o: gguf_f32(engine, tensors, &format!("{p}.attention_block.attention.wO.bias"))?,
+                q_norm: gguf_f32(engine, tensors, &format!("{p}.attention_block.attention.q_norm.scale"))?,
+                k_norm: gguf_f32(engine, tensors, &format!("{p}.attention_block.attention.k_norm.scale"))?,
+                mlp_norm_scale: gguf_f32(engine, tensors, &format!("{p}.norm.scale"))?,
+                w0: load_matmul_weight_gguf(engine, "w0", w0_shape, *w0_ty, w0_bytes),
+                b0: gguf_f32(engine, tensors, &format!("{p}.mlp.0.bias"))?,
+                w2: load_matmul_weight_gguf(engine, "w2", w2_shape, *w2_ty, w2_bytes),
+                b2: gguf_f32(engine, tensors, &format!("{p}.mlp.2.bias"))?,
+                mlp_hidden,
+            });
+        }
+
+        let out_norm_scale = gguf_f32(engine, tensors, "transformer.out_norm.scale")?;
+        let decoder = load_residual_block_gguf(engine, tensors, "decoder")?;
+
+        Ok(GpuModel {
+            config,
+            patch_encoder,
+            type_embeddings,
+            layers,
+            out_norm_scale,
+            decoder,
+        })
+    }
+
     pub fn load(engine: &Engine, weights: &Weights, config: T0Config, quant: WeightQuant) -> Result<Self> {
         let patch_encoder = load_residual_block(engine, weights, "patch_encoder.projection")?;
         let (_, type_emb) = weights.get_raw("patch_encoder.type_embeddings.weight")?;
@@ -286,10 +409,18 @@ fn linear(
     let wgs = (out_dim.div_ceil(16), rows.div_ceil(16), 1);
     match w {
         MatMulWeight::F32 { w } => {
+            // Naive is one thread per output element with zero reuse across
+            // rows -- fine at M=1 (single-forecast decode), wasteful once M
+            // grows (batching): the tiled kernel amortizes both x and w
+            // reads across a 16x16 block instead of re-reading them per
+            // thread. See docs/runs/2026-09-20-perf.md's Phase C tiled-GEMM
+            // entry for the native/browser batch-24 numbers this threshold
+            // is based on.
+            let pipeline = if rows >= TILED_THRESHOLD_ROWS { &engine.linear_tiled } else { &engine.linear };
             let dims = pool.uniform(&format!("{key}.dims"), LinearDims { m: rows, k: in_dim, n: out_dim, act });
             let bg = pool.bind_group(
                 key,
-                &engine.linear,
+                pipeline,
                 &[
                     BindGroupEntry { binding: 0, resource: x.as_entire_binding() },
                     BindGroupEntry { binding: 1, resource: w.as_entire_binding() },
@@ -298,10 +429,24 @@ fn linear(
                     BindGroupEntry { binding: 4, resource: dims.as_entire_binding() },
                 ],
             );
-            engine.dispatch(encoder, &engine.linear, &bg, wgs, key);
+            engine.dispatch(encoder, pipeline, &bg, wgs, key);
         }
         MatMulWeight::Q8_0 { qs, scales, blocks_per_row } | MatMulWeight::Q4_0 { qs, scales, blocks_per_row } => {
-            let pipeline = if matches!(w, MatMulWeight::Q8_0 { .. }) { &engine.linear_q8 } else { &engine.linear_q4 };
+            // Q4_0's dequant is cheap enough that the naive kernel is
+            // already memory-light; measured, the tiled kernel's
+            // shared-memory/barrier overhead costs more than its
+            // dequant-once-per-tile saves for this weight format (batch-24
+            // native: 36.2ms/signal naive vs 41.8ms/signal tiled -- see
+            // docs/runs/2026-09-20-perf.md). Q8_0 and F32 both win from
+            // tiling (59.5->41.8ms, 71.3->41.2ms respectively), so only
+            // Q4_0 is excluded here.
+            let tiled = rows >= TILED_THRESHOLD_ROWS && matches!(w, MatMulWeight::Q8_0 { .. });
+            let pipeline = match (matches!(w, MatMulWeight::Q8_0 { .. }), tiled) {
+                (true, true) => &engine.linear_tiled_q8,
+                (true, false) => &engine.linear_q8,
+                (false, true) => &engine.linear_tiled_q4,
+                (false, false) => &engine.linear_q4,
+            };
             let dims = pool.uniform(
                 &format!("{key}.dims"),
                 LinearQDims { m: rows, k: in_dim, n: out_dim, act, blocks_per_row: *blocks_per_row, _p0: 0, _p1: 0, _p2: 0 },
@@ -629,14 +774,21 @@ pub async fn forward_async(engine: &Engine, model: &GpuModel, series: &TimeSerie
 }
 
 
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::quant::{load_matmul_weight, WeightQuant};
 
-    /// Same guard for the Q4_0 branch (`shaders/linear_q4.wgsl`).
-    #[test]
-    fn q4_linear_kernel_matches_dequant_reference() {
+    /// Runs `linear()` at `rows=m` against a direct dequant-and-dot
+    /// reference (`t0_core::gguf::dequantize_{q8_0,q4_0}` for the
+    /// quantized cases, the raw f32 weight for `WeightQuant::F32`) and
+    /// asserts float32-rounding agreement. `m` selects naive
+    /// (`< TILED_THRESHOLD_ROWS`) vs the tiled shared-memory kernel
+    /// (`>=`), so calling this at both `m=1` and `m=40` (with the same
+    /// `k=512, n=4` weight) guards both kernel families for all three
+    /// weight residencies without duplicating the setup three times.
+    fn check_linear_kernel(quant: WeightQuant, m: usize) {
         let engine = Engine::new().unwrap();
         let k = 512usize;
         let n = 4usize;
@@ -645,70 +797,61 @@ mod tests {
             *v = (((i * 2654435761usize) % 1000) as f32 / 1000.0 - 0.5) * 0.6;
         }
         let bias = vec![0.0f32; n];
-        let x: Vec<f32> = (0..k).map(|i| (((i * 40503) % 1000) as f32 / 1000.0 - 0.5) * 0.4).collect();
+        let x: Vec<f32> = (0..m * k).map(|i| (((i * 40503) % 1000) as f32 / 1000.0 - 0.5) * 0.4).collect();
 
-        let mm = load_matmul_weight(&engine, "test_w4", &[n, k], &w, WeightQuant::Q4_0);
-        let bytes = t0_core::gguf::quantize_q4_0(&w);
-        let dequant = t0_core::gguf::dequantize_q4_0(&bytes, w.len());
-        let mut expected = vec![0f32; n];
-        for (row, e) in expected.iter_mut().enumerate() {
-            *e = (0..k).map(|col| x[col] * dequant[row * k + col]).sum::<f32>() + bias[row];
+        let dequant = match quant {
+            WeightQuant::F32 => w.clone(),
+            WeightQuant::Q8_0 => {
+                let bytes = t0_core::gguf::quantize_q8_0(&w);
+                t0_core::gguf::dequantize_q8_0(&bytes, w.len())
+            }
+            WeightQuant::Q4_0 => {
+                let bytes = t0_core::gguf::quantize_q4_0(&w);
+                t0_core::gguf::dequantize_q4_0(&bytes, w.len())
+            }
+        };
+        let mut expected = vec![0f32; m * n];
+        for row in 0..m {
+            for (col_n, e) in expected[row * n..(row + 1) * n].iter_mut().enumerate() {
+                *e = (0..k).map(|col_k| x[row * k + col_k] * dequant[col_n * k + col_k]).sum::<f32>() + bias[col_n];
+            }
         }
 
-        let x_buf = engine.pool.upload_f32("test_x4", &x);
-        let b_buf = engine.pool.upload_f32("test_b4", &bias);
-        let mut encoder = engine.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-        let out = linear(&engine, &mut encoder, "test_linear4", &x_buf, 1, k as u32, &mm, &b_buf, n as u32, 0);
-        engine.queue.submit(Some(encoder.finish()));
-        let got = pollster::block_on(engine.read_buffer(&out, n));
-
-        // Q4_0's 16 discrete levels give it a coarser quantization step than
-        // Q8_0's 256, so its dequant reference values are farther from the
-        // unquantized weights -- but the kernel's dot product against that
-        // same dequant reference should still land at float32-rounding
-        // precision, same tolerance as the Q8_0 test.
-        for i in 0..n {
-            assert!((got[i] - expected[i]).abs() < 1e-5, "row {i}: got {} expected {}", got[i], expected[i]);
-        }
-    }
-
-    /// Guards `linear()`'s Q8_0 branch (`shaders/linear_q8.wgsl`) against
-    /// the same block math `t0_core::gguf::dequantize_q8_0` uses, at a
-    /// realistic weight-row width (512, matching the model's smallest big
-    /// matmul dimension) -- the discrepancy found comparing t0-fast's full
-    /// 24-layer forward pass against a Q8_0-quantized Burn reference
-    /// (~3.5e-4 max-abs, see docs/runs/2026-09-20-perf.md) is not this
-    /// kernel: it reproduces the dequant-and-dot reference to float32
-    /// rounding (~1e-7), confirmed here.
-    #[test]
-    fn q8_linear_kernel_matches_dequant_reference() {
-        let engine = Engine::new().unwrap();
-        let k = 512usize;
-        let n = 4usize;
-        let mut w = vec![0f32; n * k];
-        for (i, v) in w.iter_mut().enumerate() {
-            *v = (((i * 2654435761usize) % 1000) as f32 / 1000.0 - 0.5) * 0.6;
-        }
-        let bias = vec![0.0f32; n];
-        let x: Vec<f32> = (0..k).map(|i| (((i * 40503) % 1000) as f32 / 1000.0 - 0.5) * 0.4).collect();
-
-        let mm = load_matmul_weight(&engine, "test_w", &[n, k], &w, WeightQuant::Q8_0);
-        let bytes = t0_core::gguf::quantize_q8_0(&w);
-        let dequant = t0_core::gguf::dequantize_q8_0(&bytes, w.len());
-        let mut expected = vec![0f32; n];
-        for (row, e) in expected.iter_mut().enumerate() {
-            *e = (0..k).map(|col| x[col] * dequant[row * k + col]).sum::<f32>() + bias[row];
-        }
-
+        let mm = load_matmul_weight(&engine, "test_w", &[n, k], &w, quant);
         let x_buf = engine.pool.upload_f32("test_x", &x);
         let b_buf = engine.pool.upload_f32("test_b", &bias);
         let mut encoder = engine.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-        let out = linear(&engine, &mut encoder, "test_linear", &x_buf, 1, k as u32, &mm, &b_buf, n as u32, 0);
+        let out = linear(&engine, &mut encoder, "test_linear", &x_buf, m as u32, k as u32, &mm, &b_buf, n as u32, 0);
         engine.queue.submit(Some(encoder.finish()));
-        let got = pollster::block_on(engine.read_buffer(&out, n));
+        let got = pollster::block_on(engine.read_buffer(&out, m * n));
 
-        for i in 0..n {
-            assert!((got[i] - expected[i]).abs() < 1e-5, "row {i}: got {} expected {}", got[i], expected[i]);
+        for i in 0..m * n {
+            assert!((got[i] - expected[i]).abs() < 1e-5, "quant={quant:?} m={m} i={i}: got {} expected {}", got[i], expected[i]);
         }
+    }
+
+    #[test]
+    fn f32_linear_naive() {
+        check_linear_kernel(WeightQuant::F32, 1);
+    }
+    #[test]
+    fn f32_linear_tiled() {
+        check_linear_kernel(WeightQuant::F32, 40);
+    }
+    #[test]
+    fn q8_linear_naive() {
+        check_linear_kernel(WeightQuant::Q8_0, 1);
+    }
+    #[test]
+    fn q8_linear_tiled() {
+        check_linear_kernel(WeightQuant::Q8_0, 40);
+    }
+    #[test]
+    fn q4_linear_naive() {
+        check_linear_kernel(WeightQuant::Q4_0, 1);
+    }
+    #[test]
+    fn q4_linear_tiled() {
+        check_linear_kernel(WeightQuant::Q4_0, 40);
     }
 }
