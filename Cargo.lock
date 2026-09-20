@@ -3822,6 +3822,7 @@ dependencies = [
  "anyhow",
  "bytemuck",
  "futures-channel",
+ "half",
  "pollster",
  "serde_json",
  "t0-core",

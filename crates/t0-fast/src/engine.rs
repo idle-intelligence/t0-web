@@ -14,6 +14,8 @@ pub struct Engine {
     pub queue: wgpu::Queue,
     pub pool: Pool,
     pub linear: wgpu::ComputePipeline,
+    pub linear_q8: wgpu::ComputePipeline,
+    pub linear_q4: wgpu::ComputePipeline,
     pub add_inplace: wgpu::ComputePipeline,
     pub gather_add: wgpu::ComputePipeline,
     pub rmsnorm_full: wgpu::ComputePipeline,
@@ -65,6 +67,8 @@ impl Engine {
         Ok(Engine {
             pool: Pool::new(device.clone(), queue.clone()),
             linear: make_pipeline(&device, "linear", include_str!("shaders/linear.wgsl")),
+            linear_q8: make_pipeline(&device, "linear_q8", include_str!("shaders/linear_q8.wgsl")),
+            linear_q4: make_pipeline(&device, "linear_q4", include_str!("shaders/linear_q4.wgsl")),
             add_inplace: make_pipeline(&device, "add_inplace", include_str!("shaders/add_inplace.wgsl")),
             gather_add: make_pipeline(&device, "gather_add", include_str!("shaders/gather_add.wgsl")),
             rmsnorm_full: make_pipeline(&device, "rmsnorm_full", include_str!("shaders/rmsnorm_full.wgsl")),

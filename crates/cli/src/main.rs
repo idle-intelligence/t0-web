@@ -370,40 +370,106 @@ fn cmd_drift(weights_f32_path: &Path, config_path: &Path, quant: &str, n_cases: 
 
 /// `t0-fast` (no Burn at inference) parity check: same fixtures, same
 /// 1e-4 max-abs gate as `cmd_parity`, but only the final quantile output
-/// is compared -- `t0-fast::model::forward_async` has no `Trace` hook.
+/// Sum of `out_dim*in_dim*4` bytes for the four big per-layer matmuls
+/// (`wQKV`, `wO`, `mlp.0`, `mlp.2`) if resident as F32 -- the "before" side
+/// of `t0-fast`'s Phase B memory report; the "after" side is
+/// `GpuModel::quantizable_gpu_bytes()`.
 #[cfg(feature = "fast")]
-fn cmd_parity_fast(fixtures_dir: &Path, weights_path: &Path, config_path: Option<&Path>) -> Result<()> {
+fn quantizable_f32_bytes(weights: &Weights, config: &T0Config) -> Result<u64> {
+    let mut total = 0u64;
+    for i in 0..config.num_layers {
+        let p = format!("transformer.layers.{i}");
+        for name in [
+            format!("{p}.attention_block.attention.wQKV.weight"),
+            format!("{p}.attention_block.attention.wO.weight"),
+            format!("{p}.mlp.0.weight"),
+            format!("{p}.mlp.2.weight"),
+        ] {
+            let shape = weights.shape(&name)?;
+            total += (shape[0] * shape[1] * 4) as u64;
+        }
+    }
+    Ok(total)
+}
+
+/// F32 (`fast_quant=f32`) compares against the fixtures' F32-reference
+/// quantile files, same gate as `cmd_parity`. Q8_0/Q4_0 compare against
+/// *Burn's own* Q8_0/Q4_0 path instead (per this task's brief): the F32
+/// weights are round-tripped through `Weights::export_gguf`/`load_gguf`
+/// (the same `quantize_q8_0`/`quantize_q4_0` math `t0-fast::quant` uses)
+/// and forecast on the `ndarray` backend, since the F32 fixtures already
+/// bake in quantization error that isn't a `t0-fast` bug.
+#[cfg(feature = "fast")]
+fn cmd_parity_fast(fixtures_dir: &Path, weights_path: &Path, config_path: Option<&Path>, fast_quant: &str) -> Result<()> {
     let manifest: Manifest = serde_json::from_str(&std::fs::read_to_string(fixtures_dir.join("manifest.json"))?)?;
     let (weights, config) = Weights::load_auto(weights_path, config_path)?;
+    let quant = t0_fast::WeightQuant::parse(fast_quant)?;
+    let f32_bytes = quantizable_f32_bytes(&weights, &config)?;
     let engine = t0_fast::Engine::new()?;
-    let model = t0_fast::load_model(&engine, &weights, config)?;
+    let model = t0_fast::load_model(&engine, &weights, config.clone(), quant)?;
+    println!(
+        "fast_quant={fast_quant} quantizable_f32_bytes={f32_bytes} quantizable_gpu_bytes={} ratio={:.3}",
+        model.quantizable_gpu_bytes(),
+        model.quantizable_gpu_bytes() as f64 / f32_bytes as f64
+    );
+
+    #[cfg(feature = "ndarray")]
+    let burn_reference: Option<T0Model<Backend>> = if fast_quant == "f32" {
+        None
+    } else {
+        let core_quant = Quant::parse(fast_quant)?;
+        let gguf_path = std::env::temp_dir().join(format!("t0_fast_parity_{fast_quant}.gguf"));
+        weights.export_gguf(&config, core_quant, &gguf_path)?;
+        let (roundtripped, rt_config) = Weights::load_gguf(&gguf_path)?;
+        Some(T0Model::load(&roundtripped, rt_config, &device())?)
+    };
+    #[cfg(not(feature = "ndarray"))]
+    let burn_reference: Option<()> = None;
+
     println!("{:<28} {:>14}", "case", "quant_max_abs");
     let mut worst = 0.0f32;
     for case in &manifest.cases {
         let context = read_f32(&fixtures_dir.join(&case.context_file))?;
-        let expected_q = read_f32(&fixtures_dir.join(&case.quantiles_file))?;
         let got_q = t0_fast::forecast(&engine, &model, &context, case.v, manifest.context_len, manifest.horizon)?;
+        #[cfg(feature = "ndarray")]
+        let expected_q = match &burn_reference {
+            Some(ref_model) => forecast(ref_model, &context, case.v, manifest.context_len, manifest.horizon, &device(), false).0,
+            None => read_f32(&fixtures_dir.join(&case.quantiles_file))?,
+        };
+        #[cfg(not(feature = "ndarray"))]
+        let expected_q = read_f32(&fixtures_dir.join(&case.quantiles_file))?;
         let (q_abs, _) = max_abs_err(&got_q, &expected_q);
         println!("{:<28} {:>14.6e}", case.name, q_abs);
         worst = worst.max(q_abs);
     }
     println!("worst quantile max-abs error across fixtures: {worst:.6e}");
-    if worst > 1e-4 {
-        return Err(anyhow!("parity gate failed: max-abs error {worst:.6e} exceeds 1e-4"));
+    if fast_quant == "f32" {
+        if worst > 1e-4 {
+            return Err(anyhow!("parity gate failed: max-abs error {worst:.6e} exceeds 1e-4"));
+        }
+        println!("parity gate PASSED (<= 1e-4 max-abs)");
+    } else {
+        // 1e-4 is the "same computation, no Burn" gate (see fast_quant=f32
+        // above and Phase A) -- it doesn't apply to a genuinely lossy
+        // quantization compared against Burn's own path on the same
+        // quantized weights. Report only; see t0-fast::model's Q8_0 kernel
+        // unit test for the isolated-kernel-correctness check instead.
+        println!("(informational vs Burn's own {fast_quant} path -- not gated at 1e-4, see t0-fast::model tests for kernel correctness)");
     }
-    println!("parity gate PASSED (<= 1e-4 max-abs)");
     Ok(())
 }
 
 #[cfg(feature = "fast")]
 #[allow(clippy::too_many_arguments)]
-fn cmd_bench_fast(weights_path: &Path, config_path: Option<&Path>, n_signals: usize, t_ctx: usize, horizon: usize, reps: usize, warmup: usize) -> Result<()> {
+fn cmd_bench_fast(weights_path: &Path, config_path: Option<&Path>, n_signals: usize, t_ctx: usize, horizon: usize, reps: usize, warmup: usize, fast_quant: &str) -> Result<()> {
     let file_size = std::fs::metadata(weights_path)?.len();
+    let quant = t0_fast::WeightQuant::parse(fast_quant)?;
     let t0 = Instant::now();
     let (weights, config) = Weights::load_auto(weights_path, config_path)?;
     let engine = t0_fast::Engine::new()?;
-    let model = t0_fast::load_model(&engine, &weights, config)?;
+    let model = t0_fast::load_model(&engine, &weights, config, quant)?;
     let load_time = t0.elapsed();
+    let quantizable_gpu_bytes = model.quantizable_gpu_bytes();
     let context = synthetic_sines(n_signals, t_ctx);
 
     for _ in 0..warmup {
@@ -421,8 +487,8 @@ fn cmd_bench_fast(weights_path: &Path, config_path: Option<&Path>, n_signals: us
     }
     let med = median(times.clone());
     println!(
-        "backend=fast weights={} file_bytes={file_size} load_s={:.3} n_signals={n_signals} t_ctx={t_ctx} horizon={horizon} \
-         reps={reps} median_s={med:.4} per_signal_ms={:.4} warm_alloc_count={warm_alloc_count} all_s={times:?}",
+        "backend=fast fast_quant={fast_quant} weights={} file_bytes={file_size} load_s={:.3} n_signals={n_signals} t_ctx={t_ctx} horizon={horizon} \
+         reps={reps} median_s={med:.4} per_signal_ms={:.4} warm_alloc_count={warm_alloc_count} quantizable_gpu_bytes={quantizable_gpu_bytes} all_s={times:?}",
         weights_path.display(),
         load_time.as_secs_f64(),
         (med * 1000.0) / n_signals as f64,
@@ -472,6 +538,7 @@ fn main() -> Result<()> {
     let mut fixture_idx = 0usize;
     let mut backend = BACKEND_NAME.to_string();
     let mut quant = "q8_0".to_string();
+    let mut fast_quant = "f32".to_string();
     let mut out = PathBuf::from("out.gguf");
     let mut n_signals = 1usize;
     let mut t_ctx = 512usize;
@@ -513,6 +580,10 @@ fn main() -> Result<()> {
             }
             "--quant" => {
                 quant = args[i + 1].clone();
+                i += 2;
+            }
+            "--fast-quant" => {
+                fast_quant = args[i + 1].clone();
                 i += 2;
             }
             "--out" => {
@@ -583,7 +654,7 @@ fn main() -> Result<()> {
         "parity" => {
             #[cfg(feature = "fast")]
             if backend == "fast" {
-                return cmd_parity_fast(&fixtures, &weights, config.as_deref());
+                return cmd_parity_fast(&fixtures, &weights, config.as_deref(), &fast_quant);
             }
             check_backend_flag(&backend)?;
             cmd_parity(&fixtures, &weights, config.as_deref())
@@ -592,7 +663,7 @@ fn main() -> Result<()> {
         "bench" => {
             #[cfg(feature = "fast")]
             if backend == "fast" {
-                return cmd_bench_fast(&weights, config.as_deref(), n_signals, t_ctx, horizon, reps, warmup);
+                return cmd_bench_fast(&weights, config.as_deref(), n_signals, t_ctx, horizon, reps, warmup, &fast_quant);
             }
             check_backend_flag(&backend)?;
             cmd_bench(&weights, config.as_deref(), n_signals, t_ctx, horizon, reps, chunk, warmup)
