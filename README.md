@@ -93,6 +93,14 @@ t0-cli forecast --fixture 0 --weights <safetensors> --config <config.json> --bac
 t0-cli bench --weights t0-alpha-q4_0.gguf --backend ndarray --signals 1000 --context 512 --horizon 96 --reps 5
 ```
 
+## Demo
+
+`web/` offers all four released weights — alpha Q8_0/Q4_0 and beta Q8_0/Q4_0 — fetched from their Hugging Face repos (`worker.js`'s `MODELS` table); `LOCAL_MODELS_DIR` there can be pointed at a local `web/models/<key>/` instead, for testing before a repo is public.
+
+## Publishing the demo
+
+`tools/publish-pages.sh` builds the `fast` wasm backend and republishes committed HEAD's `web/` (plus the built pkg) to an orphan `gh-pages` branch, following `../stt-web`'s layout (repo root = the served tree). Run it, then `git push origin gh-pages --force-with-lease`. GitHub Pages source: branch `gh-pages`, folder `/`.
+
 ## What's not done yet
 
 - `FUTURE` covariate rows in the scaler, autoregressive rollout past 1024 steps, quantile interpolation/extrapolation for non-trained levels — see `docs/runs/2026-09-19-parity.md`'s last section.
