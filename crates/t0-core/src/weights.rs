@@ -114,7 +114,14 @@ pub fn config_from_gguf_metadata(meta: &HashMap<String, MetaValue>) -> Result<T0
 impl Weights {
     pub fn load(path: &std::path::Path) -> Result<Self> {
         let bytes = std::fs::read(path).with_context(|| format!("reading {}", path.display()))?;
-        let st = SafeTensors::deserialize(&bytes).context("parsing safetensors header")?;
+        Weights::load_bytes(&bytes)
+    }
+
+    /// Same as `load` but from an in-memory buffer -- the entry point for
+    /// `t0-wasm`'s F32-residency reference path, which receives the raw
+    /// `model.safetensors` as a `Uint8Array` from JS and has no filesystem.
+    pub fn load_bytes(bytes: &[u8]) -> Result<Self> {
+        let st = SafeTensors::deserialize(bytes).context("parsing safetensors header")?;
         let mut tensors = HashMap::new();
         for (name, view) in st.tensors() {
             if view.dtype() != safetensors::Dtype::F32 {
