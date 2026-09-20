@@ -11,7 +11,7 @@ use std::time::Instant;
 use anyhow::{anyhow, Context, Result};
 use serde::Deserialize;
 use t0_core::weights::Quant;
-use t0_core::{forecast, forecast_batch_chunked, T0Config, T0Model, Weights, DEFAULT_BATCH_CHUNK};
+use t0_core::{forecast, forecast_batch_chunked, forecast_rollout, T0Config, T0Model, Weights, DEFAULT_BATCH_CHUNK};
 
 #[cfg(feature = "ndarray")]
 type Backend = burn_ndarray::NdArray<f32>;
@@ -74,6 +74,28 @@ struct Case {
     quantiles_file: String,
     patch_embedding_file: String,
     layer0_output_file: String,
+}
+
+/// `tools/make_fixtures.py`'s `manifest_long.json`: same idea as
+/// `Manifest`/`Case`, but each case carries its own `context_len`/`horizon`
+/// (rollout fixtures aren't all the same size the way the milestone-1 ones
+/// are) and skips the patch-embedding/layer0 trace comparison -- a rollout
+/// runs `model.forward` several times over different windows, so "the"
+/// trace isn't a single well-defined thing to compare.
+#[derive(Deserialize)]
+struct LongManifest {
+    quantile_levels: Vec<f32>,
+    cases: Vec<LongCase>,
+}
+
+#[derive(Deserialize)]
+struct LongCase {
+    name: String,
+    v: usize,
+    context_len: usize,
+    horizon: usize,
+    context_file: String,
+    quantiles_file: String,
 }
 
 fn read_f32(path: &Path) -> Result<Vec<f32>> {
@@ -145,6 +167,34 @@ fn cmd_parity(fixtures_dir: &Path, weights: &Path, config: Option<&Path>) -> Res
     Ok(())
 }
 
+/// `parity --long`: same idea as `cmd_parity`, but against
+/// `manifest_long.json`'s rollout fixture(s) via `forecast_rollout` instead
+/// of the single-window `forecast`. `v` must be 1 -- `forecast_rollout` is
+/// restricted to one univariate target series (see its doc comment).
+fn cmd_parity_long(fixtures_dir: &Path, weights: &Path, config: Option<&Path>) -> Result<()> {
+    let manifest: LongManifest = serde_json::from_str(&std::fs::read_to_string(fixtures_dir.join("manifest_long.json"))?)?;
+    let (model, load_time) = load_model(weights, config)?;
+    println!("loaded in {:.3}s", load_time.as_secs_f64());
+    let dev = device();
+    println!("{:<28} {:>10} {:>10} {:>14} {:>14}", "case", "context", "horizon", "quant_max_abs", "quant_max_rel");
+    let mut worst = 0.0f32;
+    for case in &manifest.cases {
+        assert_eq!(case.v, 1, "forecast_rollout only supports a single univariate target series");
+        let context = read_f32(&fixtures_dir.join(&case.context_file))?;
+        let expected_q = read_f32(&fixtures_dir.join(&case.quantiles_file))?;
+        let got_q = forecast_rollout(&model, &context, case.context_len, case.horizon, &manifest.quantile_levels, &dev);
+        let (q_abs, q_rel) = max_abs_err(&got_q, &expected_q);
+        println!("{:<28} {:>10} {:>10} {:>14.6e} {:>14.6e}", case.name, case.context_len, case.horizon, q_abs, q_rel);
+        worst = worst.max(q_abs);
+    }
+    println!("worst quantile max-abs error across long fixtures: {worst:.6e}");
+    if worst > 1e-4 {
+        return Err(anyhow!("long parity gate failed: max-abs error {worst:.6e} exceeds 1e-4"));
+    }
+    println!("long parity gate PASSED (<= 1e-4 max-abs)");
+    Ok(())
+}
+
 /// Forecasts every window of every task in a GIFT-Eval subset manifest
 /// (`tools/gifteval_subset.py`'s output) and writes one little-endian f32
 /// file per task: `n_windows * horizon * n_quantiles` values, window-major,
@@ -195,6 +245,7 @@ fn cmd_gifteval(manifest_dir: &Path, weights: &Path, config: Option<&Path>, out_
 /// against a third-party export (e.g. the official ONNX INT8 build) on the
 /// exact same context/horizon window this repo's own demo page uses — see
 /// `docs/runs/2026-09-20-head-to-head.md`.
+#[allow(clippy::too_many_arguments)]
 fn cmd_forecast_raw(
     weights_path: &Path,
     config_path: Option<&Path>,
@@ -202,13 +253,20 @@ fn cmd_forecast_raw(
     origin: usize,
     t_ctx: usize,
     horizon: usize,
+    rollout: bool,
     out: &Path,
 ) -> Result<()> {
     let series = read_f32(series_path)?;
     let ctx_start = origin.saturating_sub(t_ctx);
     let context = &series[ctx_start..origin];
     let (model, load_time) = load_model(weights_path, config_path)?;
-    let (q, _) = forecast(&model, context, 1, context.len(), horizon, &device(), false);
+    let q = if rollout {
+        let dev = device();
+        let query_levels = model.config.quantile_levels.clone();
+        forecast_rollout(&model, context, context.len(), horizon, &query_levels, &dev)
+    } else {
+        forecast(&model, context, 1, context.len(), horizon, &device(), false).0
+    };
     let bytes: Vec<u8> = q.iter().flat_map(|v| v.to_le_bytes()).collect();
     std::fs::write(out, &bytes)?;
     println!(
@@ -620,6 +678,7 @@ fn main() -> Result<()> {
     let mut fixture_idx = 0usize;
     let mut backend = BACKEND_NAME.to_string();
     let mut quant = "q8_0".to_string();
+    #[cfg(feature = "fast")]
     let mut fast_quant = "f32".to_string();
     let mut out = PathBuf::from("out.gguf");
     let mut n_signals = 1usize;
@@ -635,6 +694,8 @@ fn main() -> Result<()> {
     let mut gift_out = PathBuf::from("fixtures/gifteval/forecasts");
     let mut series_file: Option<PathBuf> = None;
     let mut origin = 0usize;
+    let mut long = false;
+    let mut rollout = false;
     let cmd = args.get(1).cloned().unwrap_or_default();
 
     let mut i = 2;
@@ -665,7 +726,10 @@ fn main() -> Result<()> {
                 i += 2;
             }
             "--fast-quant" => {
-                fast_quant = args[i + 1].clone();
+                #[cfg(feature = "fast")]
+                {
+                    fast_quant = args[i + 1].clone();
+                }
                 i += 2;
             }
             "--out" => {
@@ -724,6 +788,14 @@ fn main() -> Result<()> {
                 origin = args[i + 1].parse()?;
                 i += 2;
             }
+            "--long" => {
+                long = true;
+                i += 1;
+            }
+            "--rollout" => {
+                rollout = true;
+                i += 1;
+            }
             other => return Err(anyhow!("unknown argument: {other}")),
         }
     }
@@ -739,7 +811,11 @@ fn main() -> Result<()> {
                 return cmd_parity_fast(&fixtures, &weights, config.as_deref(), &fast_quant);
             }
             check_backend_flag(&backend)?;
-            cmd_parity(&fixtures, &weights, config.as_deref())
+            if long {
+                cmd_parity_long(&fixtures, &weights, config.as_deref())
+            } else {
+                cmd_parity(&fixtures, &weights, config.as_deref())
+            }
         }
         "export-gguf" => cmd_export_gguf(&weights, config.as_deref().ok_or_else(|| anyhow!("--config is required"))?, &quant, &out),
         "bench" => {
@@ -760,7 +836,7 @@ fn main() -> Result<()> {
         "forecast-raw" => {
             check_backend_flag(&backend)?;
             let series_file = series_file.ok_or_else(|| anyhow!("--series-file is required"))?;
-            cmd_forecast_raw(&weights, config.as_deref(), &series_file, origin, t_ctx, horizon, &out)
+            cmd_forecast_raw(&weights, config.as_deref(), &series_file, origin, t_ctx, horizon, rollout, &out)
         }
         "drift" => {
             let weights_f32 = weights_f32.ok_or_else(|| anyhow!("--weights-f32 is required"))?;
