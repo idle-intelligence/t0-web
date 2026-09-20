@@ -589,6 +589,36 @@ fn cmd_parity_fast(fixtures_dir: &Path, weights_path: &Path, config_path: Option
     Ok(())
 }
 
+/// `parity --long --backend fast`: same idea as `cmd_parity_long`, but
+/// through `t0_fast::forecast_rollout` (F32 weights only -- there's no
+/// reference to compare a quantized rollout against here, same reasoning as
+/// `cmd_parity_fast`'s `fast_quant=f32` gate).
+#[cfg(feature = "fast")]
+fn cmd_parity_long_fast(fixtures_dir: &Path, weights_path: &Path, config_path: Option<&Path>) -> Result<()> {
+    let manifest: LongManifest = serde_json::from_str(&std::fs::read_to_string(fixtures_dir.join("manifest_long.json"))?)?;
+    let engine = t0_fast::Engine::new()?;
+    let (weights, config) = Weights::load_auto(weights_path, config_path)?;
+    let model = t0_fast::load_model(&engine, &weights, config, t0_fast::WeightQuant::F32)?;
+
+    println!("{:<28} {:>10} {:>10} {:>14} {:>14}", "case", "context", "horizon", "quant_max_abs", "quant_max_rel");
+    let mut worst = 0.0f32;
+    for case in &manifest.cases {
+        assert_eq!(case.v, 1, "forecast_rollout only supports a single univariate target series");
+        let context = read_f32(&fixtures_dir.join(&case.context_file))?;
+        let expected_q = read_f32(&fixtures_dir.join(&case.quantiles_file))?;
+        let got_q = t0_fast::forecast_rollout(&engine, &model, &context, case.context_len, case.horizon, &manifest.quantile_levels)?;
+        let (q_abs, q_rel) = max_abs_err(&got_q, &expected_q);
+        println!("{:<28} {:>10} {:>10} {:>14.6e} {:>14.6e}", case.name, case.context_len, case.horizon, q_abs, q_rel);
+        worst = worst.max(q_abs);
+    }
+    println!("worst quantile max-abs error across long fixtures (fast backend): {worst:.6e}");
+    if worst > 1e-4 {
+        return Err(anyhow!("long parity gate failed: max-abs error {worst:.6e} exceeds 1e-4"));
+    }
+    println!("long parity gate PASSED (<= 1e-4 max-abs)");
+    Ok(())
+}
+
 #[cfg(feature = "fast")]
 #[allow(clippy::too_many_arguments)]
 fn cmd_bench_fast(weights_path: &Path, config_path: Option<&Path>, n_signals: usize, t_ctx: usize, horizon: usize, reps: usize, warmup: usize, fast_quant: &str, chunk: usize) -> Result<()> {
@@ -808,7 +838,11 @@ fn main() -> Result<()> {
         "parity" => {
             #[cfg(feature = "fast")]
             if backend == "fast" {
-                return cmd_parity_fast(&fixtures, &weights, config.as_deref(), &fast_quant);
+                return if long {
+                    cmd_parity_long_fast(&fixtures, &weights, config.as_deref())
+                } else {
+                    cmd_parity_fast(&fixtures, &weights, config.as_deref(), &fast_quant)
+                };
             }
             check_backend_flag(&backend)?;
             if long {
