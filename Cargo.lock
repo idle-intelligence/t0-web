@@ -3797,6 +3797,7 @@ dependencies = [
  "serde",
  "serde_json",
  "t0-core",
+ "t0-fast",
 ]
 
 [[package]]
@@ -3812,6 +3813,19 @@ dependencies = [
  "safetensors 0.4.5",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "t0-fast"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytemuck",
+ "futures-channel",
+ "pollster",
+ "serde_json",
+ "t0-core",
+ "wgpu",
 ]
 
 [[package]]

@@ -256,6 +256,14 @@ impl Weights {
         self.tensors.get(name).ok_or_else(|| anyhow!("missing tensor: {name}"))
     }
 
+    /// Raw shape + f32 data for a tensor, with no Burn `Backend` involved.
+    /// For `t0-fast`, which uploads weights straight into `wgpu::Buffer`s
+    /// and never builds a Burn tensor.
+    pub fn get_raw(&self, name: &str) -> Result<(&[usize], &[f32])> {
+        let (shape, data) = self.raw(name)?;
+        Ok((shape.as_slice(), data.as_slice()))
+    }
+
     pub fn shape(&self, name: &str) -> Result<Vec<usize>> {
         Ok(self.raw(name)?.0.clone())
     }
