@@ -258,3 +258,22 @@ CPU (ndarray), origin dates and context lengths (see `docs/runs/2026-09-19-web-s
 WebGPU, same page/series/quant, GPU confirmed idle: 173.0 / 177.5 / 177.0 ms (table above). Both backends: PASS on every gate (length, finite, monotone, MAE/sMAPE finite, drag produces exactly one forecast, slider `input`-only leaves the log line count unchanged).
 
 Analysis: `docs/runs/2026-09-19-web-smoke.md`.
+
+## Head-to-head: official INT8 vs ours (same browser, M2)
+
+- Machine: Apple M2 (Darwin 25.3.0), Playwright's bundled Chromium-for-Testing `chromium-1243` (`Google Chrome for Testing 153.0.8010.12`).
+- Their artifact: `theforecastingcompany/t0-alpha-onnx-int8` (`t0-alpha-grouped-int8.onnx`, 107.2 MB), `onnxruntime-web` 1.29.0, WebGPU execution provider (ran successfully, no WASM fallback triggered — see `docs/runs/2026-09-20-head-to-head.md`).
+- Our artifacts: `t0-cli export-gguf` output from the same `theforecastingcompany/t0-alpha` checkpoint, `burn-wgpu`/`burn` 0.20.
+- Fixture: `web/data/series.f32` (`us_births`), origin index 3600, context 512, horizon 32 — same window `web/worker.js` uses.
+- Drift column: max-abs diff vs our native F32 reference (`t0-cli forecast-raw`), as % of this window's forecast range (2266.84 births/day). Subset CRPS/MASE: our own 8-config GIFT-Eval subset (`docs/runs/2026-09-19-gifteval-subset.md`), reference-F32-vs-ours only — the ONNX artifact was not run through the (Python/gluonts) GIFT-Eval harness this session, marked N/A rather than inferred.
+
+| | download MB | cold ms | warm ms (median of 10) | 24-signal batch ms/signal | drift max-abs (% of window range) | subset CRPS (aggregate) | subset MASE (aggregate) |
+|---|---|---|---|---|---|---|---|
+| their ONNX INT8 (WebGPU EP) | 107.2 | 167.5 | 64.0 | 8.87 | 0.79% | N/A | N/A |
+| our Q8_0 WebGPU | 108.9 | 707.1 | 162.5 | 46.07 | 0.20% | 0.0897 | 1.2139 |
+| our Q4_0 WebGPU | 58.6 | 276.6 | 162.7 | 33.49 | 3.84% | 0.0898 | 1.2157 |
+| our Q8_0 CPU (ndarray/wasm) | 108.9 | 604.9 | 576.4 | 320.57 | 0.20% | 0.0897 | 1.2139 |
+
+**Quotable paragraph.** On the same M2, same headless Chromium build, same `us_births` window (context 512, horizon 32), their official `t0-alpha-onnx-int8` export ran on onnxruntime-web's WebGPU execution provider (no WASM fallback needed) and is faster per call than our current WebGPU port — 64 ms warm vs our 162.5 ms (Q8_0) / 162.7 ms (Q4_0), and 8.9 ms/signal vs our 33-46 ms/signal in a 24-signal batch — a gap consistent with their ONNX Runtime graph being one fused, already-optimized kernel pipeline against our per-op Burn/wgpu dispatch chain, not a claim that our approach can't close it. Where we are ahead: numerical fidelity to the shared F32 reference on this window (our Q8_0 max-abs drift is 0.20% of the forecast range vs their INT8 export's 0.79%, i.e. about 4x tighter) and file size at the low end (our Q4_0 is 58.6 MB vs their 107.2 MB, 45% smaller, at 3.84% drift — a different point on the size/accuracy curve, not a strict win). Our CPU/wasm path (Q8_0, 576 ms warm) is not competitive with either WebGPU number and isn't the intended fast path. Every number here is measured on this one fixture window and this one machine/browser, not the published multi-thousand-case drift or GIFT-Eval protocols (see the 54-case and 8-config subset numbers elsewhere in this file for the more statistically powered comparisons, both of which already show our Q8_0 within noise of F32 and ahead of our own reimplementation of their INT8 recipe). Bottom line: beaten on raw per-call latency by their shipped, already-optimized ONNX export; ahead on quantization fidelity and offering a materially smaller file at the low end — "faster and better" is not yet true simultaneously, and this table is the honest split.
+
+Analysis and exact commands: `docs/runs/2026-09-20-head-to-head.md`.
