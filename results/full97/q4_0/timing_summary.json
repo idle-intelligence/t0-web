@@ -1,0 +1,590 @@
+{
+  "variant": "q4_0",
+  "context_length": 8192,
+  "max_minutes": 300.0,
+  "stopped_early": false,
+  "timings": [
+    {
+      "config": "loop_seattle/5T/short",
+      "n_windows": 6460,
+      "elapsed_s": 155.60167187300976,
+      "s_per_window": 0.024086946110373028
+    },
+    {
+      "config": "loop_seattle/5T/medium",
+      "n_windows": 6460,
+      "elapsed_s": 152.3056224110187,
+      "s_per_window": 0.023576721735451812
+    },
+    {
+      "config": "loop_seattle/5T/long",
+      "n_windows": 4845,
+      "elapsed_s": 115.22867193102138,
+      "s_per_window": 0.023783007622501833
+    },
+    {
+      "config": "loop_seattle/D/short",
+      "n_windows": 646,
+      "elapsed_s": 1.2701325379894115,
+      "s_per_window": 0.0019661494396120923
+    },
+    {
+      "config": "loop_seattle/H/short",
+      "n_windows": 6137,
+      "elapsed_s": 55.3122861419688,
+      "s_per_window": 0.009012919364831154
+    },
+    {
+      "config": "loop_seattle/H/medium",
+      "n_windows": 646,
+      "elapsed_s": 5.95271712099202,
+      "s_per_window": 0.009214732385436563
+    },
+    {
+      "config": "loop_seattle/H/long",
+      "n_windows": 646,
+      "elapsed_s": 5.774950637016445,
+      "s_per_window": 0.0089395520696849
+    },
+    {
+      "config": "m_dense/D/short",
+      "n_windows": 90,
+      "elapsed_s": 0.4286225279793143,
+      "s_per_window": 0.004762472533103492
+    },
+    {
+      "config": "m_dense/H/short",
+      "n_windows": 600,
+      "elapsed_s": 5.900873952021357,
+      "s_per_window": 0.009834789920035595
+    },
+    {
+      "config": "m_dense/H/medium",
+      "n_windows": 120,
+      "elapsed_s": 1.2862048280076124,
+      "s_per_window": 0.010718373566730104
+    },
+    {
+      "config": "m_dense/H/long",
+      "n_windows": 90,
+      "elapsed_s": 0.9873313000425696,
+      "s_per_window": 0.010970347778250773
+    },
+    {
+      "config": "sz_taxi/15T/short",
+      "n_windows": 1092,
+      "elapsed_s": 4.689235048019327,
+      "s_per_window": 0.004294171289394988
+    },
+    {
+      "config": "sz_taxi/15T/medium",
+      "n_windows": 156,
+      "elapsed_s": 0.8267754429834895,
+      "s_per_window": 0.005299842583227497
+    },
+    {
+      "config": "sz_taxi/15T/long",
+      "n_windows": 156,
+      "elapsed_s": 0.7638878370053135,
+      "s_per_window": 0.004896716903880214
+    },
+    {
+      "config": "sz_taxi/H/short",
+      "n_windows": 312,
+      "elapsed_s": 0.8126561780227348,
+      "s_per_window": 0.002604667237252355
+    },
+    {
+      "config": "bitbrains_fast_storage/5T/short",
+      "n_windows": 45000,
+      "elapsed_s": 414.81033968902193,
+      "s_per_window": 0.009218007548644932
+    },
+    {
+      "config": "bitbrains_fast_storage/5T/medium",
+      "n_windows": 5000,
+      "elapsed_s": 43.40073490800569,
+      "s_per_window": 0.008680146981601137
+    },
+    {
+      "config": "bitbrains_fast_storage/5T/long",
+      "n_windows": 5000,
+      "elapsed_s": 43.21001421503024,
+      "s_per_window": 0.008642002843006048
+    },
+    {
+      "config": "bitbrains_fast_storage/H/short",
+      "n_windows": 5000,
+      "elapsed_s": 9.013669434993062,
+      "s_per_window": 0.0018027338869986125
+    },
+    {
+      "config": "bitbrains_rnd/5T/short",
+      "n_windows": 18000,
+      "elapsed_s": 163.78120472701266,
+      "s_per_window": 0.00909895581816737
+    },
+    {
+      "config": "bitbrains_rnd/5T/medium",
+      "n_windows": 2000,
+      "elapsed_s": 17.630821979022585,
+      "s_per_window": 0.008815410989511292
+    },
+    {
+      "config": "bitbrains_rnd/5T/long",
+      "n_windows": 2000,
+      "elapsed_s": 17.248609825968742,
+      "s_per_window": 0.008624304912984371
+    },
+    {
+      "config": "bitbrains_rnd/H/short",
+      "n_windows": 2000,
+      "elapsed_s": 3.7230361030087806,
+      "s_per_window": 0.0018615180515043903
+    },
+    {
+      "config": "bizitobs_application/10S/short",
+      "n_windows": 30,
+      "elapsed_s": 0.4149747070041485,
+      "s_per_window": 0.013832490233471616
+    },
+    {
+      "config": "bizitobs_application/10S/medium",
+      "n_windows": 4,
+      "elapsed_s": 0.19275345298228785,
+      "s_per_window": 0.048188363245571963
+    },
+    {
+      "config": "bizitobs_application/10S/long",
+      "n_windows": 2,
+      "elapsed_s": 0.17288932600058615,
+      "s_per_window": 0.08644466300029308
+    },
+    {
+      "config": "bizitobs_l2c/5T/short",
+      "n_windows": 140,
+      "elapsed_s": 1.8564102060045116,
+      "s_per_window": 0.013260072900032225
+    },
+    {
+      "config": "bizitobs_l2c/5T/medium",
+      "n_windows": 49,
+      "elapsed_s": 0.6589642119943164,
+      "s_per_window": 0.013448249224373805
+    },
+    {
+      "config": "bizitobs_l2c/5T/long",
+      "n_windows": 35,
+      "elapsed_s": 0.5387848939863034,
+      "s_per_window": 0.015393854113894382
+    },
+    {
+      "config": "bizitobs_l2c/H/short",
+      "n_windows": 42,
+      "elapsed_s": 0.33366107201436535,
+      "s_per_window": 0.00794431123843727
+    },
+    {
+      "config": "bizitobs_l2c/H/medium",
+      "n_windows": 7,
+      "elapsed_s": 0.06160839198855683,
+      "s_per_window": 0.008801198855508119
+    },
+    {
+      "config": "bizitobs_l2c/H/long",
+      "n_windows": 7,
+      "elapsed_s": 0.18115741497604176,
+      "s_per_window": 0.02587963071086311
+    },
+    {
+      "config": "bizitobs_service/10S/short",
+      "n_windows": 630,
+      "elapsed_s": 5.618596288957633,
+      "s_per_window": 0.00891840680786926
+    },
+    {
+      "config": "bizitobs_service/10S/medium",
+      "n_windows": 84,
+      "elapsed_s": 0.9777319940039888,
+      "s_per_window": 0.011639666595285581
+    },
+    {
+      "config": "bizitobs_service/10S/long",
+      "n_windows": 42,
+      "elapsed_s": 0.6687582589802332,
+      "s_per_window": 0.015922815690005553
+    },
+    {
+      "config": "car_parts/M/short",
+      "n_windows": 2674,
+      "elapsed_s": 4.096713358012494,
+      "s_per_window": 0.0015320543597653305
+    },
+    {
+      "config": "covid_deaths/D/short",
+      "n_windows": 266,
+      "elapsed_s": 0.6607194769894704,
+      "s_per_window": 0.002483907808231092
+    },
+    {
+      "config": "electricity/15T/short",
+      "n_windows": 7400,
+      "elapsed_s": 218.90643406298477,
+      "s_per_window": 0.029581950549051998
+    },
+    {
+      "config": "electricity/15T/medium",
+      "n_windows": 7400,
+      "elapsed_s": 217.25213100598194,
+      "s_per_window": 0.029358396081889452
+    },
+    {
+      "config": "electricity/15T/long",
+      "n_windows": 7400,
+      "elapsed_s": 216.016353125975,
+      "s_per_window": 0.029191399071077703
+    },
+    {
+      "config": "electricity/D/short",
+      "n_windows": 1850,
+      "elapsed_s": 5.371560717001557,
+      "s_per_window": 0.0029035463335143554
+    },
+    {
+      "config": "electricity/H/short",
+      "n_windows": 7400,
+      "elapsed_s": 93.07219391298713,
+      "s_per_window": 0.012577323501755017
+    },
+    {
+      "config": "electricity/H/medium",
+      "n_windows": 2960,
+      "elapsed_s": 37.48070271394681,
+      "s_per_window": 0.012662399565522571
+    },
+    {
+      "config": "electricity/H/long",
+      "n_windows": 1850,
+      "elapsed_s": 24.19221185101196,
+      "s_per_window": 0.013076871270817277
+    },
+    {
+      "config": "electricity/W/short",
+      "n_windows": 1110,
+      "elapsed_s": 2.3175940380315296,
+      "s_per_window": 0.0020879225567851617
+    },
+    {
+      "config": "ett1/15T/short",
+      "n_windows": 140,
+      "elapsed_s": 2.4929525629850104,
+      "s_per_window": 0.017806804021321503
+    },
+    {
+      "config": "ett1/15T/medium",
+      "n_windows": 105,
+      "elapsed_s": 2.0212076370371506,
+      "s_per_window": 0.019249596543210956
+    },
+    {
+      "config": "ett1/15T/long",
+      "n_windows": 70,
+      "elapsed_s": 1.4114448499749415,
+      "s_per_window": 0.020163497856784878
+    },
+    {
+      "config": "ett1/D/short",
+      "n_windows": 21,
+      "elapsed_s": 0.18699695001123473,
+      "s_per_window": 0.008904616667201654
+    },
+    {
+      "config": "ett1/H/short",
+      "n_windows": 140,
+      "elapsed_s": 1.4383862130343914,
+      "s_per_window": 0.010274187235959938
+    },
+    {
+      "config": "ett1/H/medium",
+      "n_windows": 28,
+      "elapsed_s": 0.3117394919972867,
+      "s_per_window": 0.011133553285617381
+    },
+    {
+      "config": "ett1/H/long",
+      "n_windows": 21,
+      "elapsed_s": 0.2777729660156183,
+      "s_per_window": 0.013227284095981824
+    },
+    {
+      "config": "ett1/W/short",
+      "n_windows": 14,
+      "elapsed_s": 0.0754197399946861,
+      "s_per_window": 0.005387124285334721
+    },
+    {
+      "config": "ett2/15T/short",
+      "n_windows": 140,
+      "elapsed_s": 2.671636647952255,
+      "s_per_window": 0.019083118913944676
+    },
+    {
+      "config": "ett2/15T/medium",
+      "n_windows": 105,
+      "elapsed_s": 1.99091277300613,
+      "s_per_window": 0.018961074028629808
+    },
+    {
+      "config": "ett2/15T/long",
+      "n_windows": 70,
+      "elapsed_s": 1.2918380260234699,
+      "s_per_window": 0.018454828943192426
+    },
+    {
+      "config": "ett2/D/short",
+      "n_windows": 21,
+      "elapsed_s": 0.19262582797091454,
+      "s_per_window": 0.009172658474805454
+    },
+    {
+      "config": "ett2/H/short",
+      "n_windows": 140,
+      "elapsed_s": 1.5412405550014228,
+      "s_per_window": 0.011008861107153019
+    },
+    {
+      "config": "ett2/H/medium",
+      "n_windows": 28,
+      "elapsed_s": 0.3085834970115684,
+      "s_per_window": 0.011020839178984585
+    },
+    {
+      "config": "ett2/H/long",
+      "n_windows": 21,
+      "elapsed_s": 0.3864549699937925,
+      "s_per_window": 0.01840261761875202
+    },
+    {
+      "config": "ett2/W/short",
+      "n_windows": 14,
+      "elapsed_s": 0.10149656899739057,
+      "s_per_window": 0.0072497549283850405
+    },
+    {
+      "config": "hierarchical_sales/D/short",
+      "n_windows": 826,
+      "elapsed_s": 3.2963923100032844,
+      "s_per_window": 0.003990789721553613
+    },
+    {
+      "config": "hierarchical_sales/W/short",
+      "n_windows": 472,
+      "elapsed_s": 1.2103210299974307,
+      "s_per_window": 0.0025642394703335398
+    },
+    {
+      "config": "hospital/M/short",
+      "n_windows": 767,
+      "elapsed_s": 1.3123438130132854,
+      "s_per_window": 0.0017110088826770345
+    },
+    {
+      "config": "jena_weather/10T/short",
+      "n_windows": 420,
+      "elapsed_s": 6.646350663038902,
+      "s_per_window": 0.01582464443580691
+    },
+    {
+      "config": "jena_weather/10T/medium",
+      "n_windows": 231,
+      "elapsed_s": 3.637282237992622,
+      "s_per_window": 0.015745810554080614
+    },
+    {
+      "config": "jena_weather/10T/long",
+      "n_windows": 168,
+      "elapsed_s": 2.632531642972026,
+      "s_per_window": 0.015669831208166823
+    },
+    {
+      "config": "jena_weather/D/short",
+      "n_windows": 42,
+      "elapsed_s": 0.17800215701572597,
+      "s_per_window": 0.004238146595612523
+    },
+    {
+      "config": "jena_weather/H/short",
+      "n_windows": 399,
+      "elapsed_s": 3.7104402360273525,
+      "s_per_window": 0.009299348962474568
+    },
+    {
+      "config": "jena_weather/H/medium",
+      "n_windows": 42,
+      "elapsed_s": 0.4217582709970884,
+      "s_per_window": 0.010041863595168772
+    },
+    {
+      "config": "jena_weather/H/long",
+      "n_windows": 42,
+      "elapsed_s": 0.49747585301520303,
+      "s_per_window": 0.011844663167028643
+    },
+    {
+      "config": "kdd_cup_2018/D/short",
+      "n_windows": 540,
+      "elapsed_s": 1.2203268620069139,
+      "s_per_window": 0.0022598645592720626
+    },
+    {
+      "config": "kdd_cup_2018/H/short",
+      "n_windows": 5400,
+      "elapsed_s": 46.79733315698104,
+      "s_per_window": 0.008666172806848341
+    },
+    {
+      "config": "kdd_cup_2018/H/medium",
+      "n_windows": 540,
+      "elapsed_s": 5.170524148037657,
+      "s_per_window": 0.009575044718588254
+    },
+    {
+      "config": "kdd_cup_2018/H/long",
+      "n_windows": 540,
+      "elapsed_s": 5.296110873983707,
+      "s_per_window": 0.009807612729599458
+    },
+    {
+      "config": "m4_daily/D/short",
+      "n_windows": 4227,
+      "elapsed_s": 39.133042011002544,
+      "s_per_window": 0.009257876037615931
+    },
+    {
+      "config": "m4_hourly/H/short",
+      "n_windows": 414,
+      "elapsed_s": 1.1194600659655407,
+      "s_per_window": 0.0027040098211728036
+    },
+    {
+      "config": "m4_monthly/M/short",
+      "n_windows": 48000,
+      "elapsed_s": 202.4104265209753,
+      "s_per_window": 0.004216883885853652
+    },
+    {
+      "config": "m4_quarterly/Q/short",
+      "n_windows": 24000,
+      "elapsed_s": 110.49925079295645,
+      "s_per_window": 0.004604135449706518
+    },
+    {
+      "config": "m4_weekly/W/short",
+      "n_windows": 359,
+      "elapsed_s": 2.462959627970122,
+      "s_per_window": 0.006860611777075548
+    },
+    {
+      "config": "m4_yearly/A/short",
+      "n_windows": 22974,
+      "elapsed_s": 100.28158036299283,
+      "s_per_window": 0.004365003062722766
+    },
+    {
+      "config": "restaurant/D/short",
+      "n_windows": 807,
+      "elapsed_s": 4.964936131960712,
+      "s_per_window": 0.006152337214325542
+    },
+    {
+      "config": "saugeen/D/short",
+      "n_windows": 20,
+      "elapsed_s": 0.3608990419888869,
+      "s_per_window": 0.018044952099444345
+    },
+    {
+      "config": "saugeen/M/short",
+      "n_windows": 7,
+      "elapsed_s": 0.1610030769952573,
+      "s_per_window": 0.02300043957075104
+    },
+    {
+      "config": "saugeen/W/short",
+      "n_windows": 20,
+      "elapsed_s": 0.4487326020025648,
+      "s_per_window": 0.02243663010012824
+    },
+    {
+      "config": "solar/10T/short",
+      "n_windows": 2740,
+      "elapsed_s": 41.997028329002205,
+      "s_per_window": 0.015327382601825623
+    },
+    {
+      "config": "solar/10T/medium",
+      "n_windows": 1507,
+      "elapsed_s": 23.032260485982988,
+      "s_per_window": 0.015283517243518905
+    },
+    {
+      "config": "solar/10T/long",
+      "n_windows": 1096,
+      "elapsed_s": 17.114583921968006,
+      "s_per_window": 0.015615496279167888
+    },
+    {
+      "config": "solar/D/short",
+      "n_windows": 274,
+      "elapsed_s": 0.6621042100014165,
+      "s_per_window": 0.002416438722632907
+    },
+    {
+      "config": "solar/H/short",
+      "n_windows": 2603,
+      "elapsed_s": 23.48184720694553,
+      "s_per_window": 0.009021070767170776
+    },
+    {
+      "config": "solar/H/medium",
+      "n_windows": 274,
+      "elapsed_s": 2.6201495390268974,
+      "s_per_window": 0.009562589558492327
+    },
+    {
+      "config": "solar/H/long",
+      "n_windows": 274,
+      "elapsed_s": 2.5766429520444945,
+      "s_per_window": 0.009403806394322973
+    },
+    {
+      "config": "solar/W/short",
+      "n_windows": 137,
+      "elapsed_s": 0.3840660550049506,
+      "s_per_window": 0.0028034018613500044
+    },
+    {
+      "config": "temperature_rain/D/short",
+      "n_windows": 96216,
+      "elapsed_s": 188.40187319600955,
+      "s_per_window": 0.0019581137565062934
+    },
+    {
+      "config": "us_births/D/short",
+      "n_windows": 20,
+      "elapsed_s": 0.5869622270110995,
+      "s_per_window": 0.029348111350554974
+    },
+    {
+      "config": "us_births/M/short",
+      "n_windows": 2,
+      "elapsed_s": 0.08582951797870919,
+      "s_per_window": 0.042914758989354596
+    },
+    {
+      "config": "us_births/W/short",
+      "n_windows": 14,
+      "elapsed_s": 0.3995680030202493,
+      "s_per_window": 0.02854057164430352
+    }
+  ]
+}
