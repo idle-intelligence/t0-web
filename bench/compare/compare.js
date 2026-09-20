@@ -310,11 +310,11 @@ function renderBatchTable(rows) {
 // computeAgreement() result. Three rows per quantile (plus overall): the
 // 1e-6-scale row (ours vs the true F32 reference) sits next to the
 // quantized-vs-quantized rows so the two error sources aren't conflated.
-const AGREE_NOTE = 'The 1e-6 parity is our engine against the F32 reference with identical weights; the difference between the two quantized models is the sum of their two quantization errors.';
+const AGREE_NOTE = 'The 1e-6 parity is the II engine against the F32 reference with identical weights; the difference between the two quantized models is the sum of the two quantization errors.';
 const AGREE_COMPARISONS = [
-    ['theirsVsOurs', 'theirs (INT8) vs ours (quantized)'],
-    ['oursVsF32', 'ours (quantized) vs F32 reference'],
-    ['theirsVsF32', 'theirs (INT8) vs F32 reference'],
+    ['theirsVsOurs', 'TFC (INT8) vs II (quantized)'],
+    ['oursVsF32', 'II (quantized) vs F32 reference'],
+    ['theirsVsF32', 'TFC (INT8) vs F32 reference'],
 ];
 
 function renderAgreementTable(agreement) {
@@ -463,9 +463,9 @@ async function run(overrideConfig) {
         const batchNote = cfg.usePasted ? 'same window x24 (no history to shift)' : '24 distinct shifted windows (stride 1 day)';
         try {
             const { ms } = await onnxRun(theirs.session, rows, cfg.context, cfg.horizon);
-            batchRows.push({ engine: 'theirs (ONNX)', msTotal: ms, msPerSignal: ms / N_BATCH, note: batchNote });
+            batchRows.push({ engine: 'TFC (ONNX)', msTotal: ms, msPerSignal: ms / N_BATCH, note: batchNote });
         } catch (e) {
-            batchRows.push({ engine: 'theirs (ONNX)', error: e.message || String(e) });
+            batchRows.push({ engine: 'TFC (ONNX)', error: e.message || String(e) });
         }
         let rowParityMaxAbs = null;
         let rowParityRange = null;
@@ -477,7 +477,7 @@ async function run(overrideConfig) {
             const t0 = performance.now();
             const batchOut = await ours.model.forecastBatchRows(concatRows, lengths, cfg.horizon);
             const ms = performance.now() - t0;
-            batchRows.push({ engine: 'ours (t0-fast)', msTotal: ms, msPerSignal: ms / N_BATCH, note: batchNote });
+            batchRows.push({ engine: 'II (t0-fast)', msTotal: ms, msPerSignal: ms / N_BATCH, note: batchNote });
 
             // Headless parity gate: every row of forecastBatchRows must
             // equal that row's own single-signal forecast() to within a
@@ -510,7 +510,7 @@ async function run(overrideConfig) {
                 );
             }
         } catch (e) {
-            batchRows.push({ engine: 'ours (t0-fast)', error: e.message || String(e) });
+            batchRows.push({ engine: 'II (t0-fast)', error: e.message || String(e) });
         }
 
         // agreement: computeHorizon on theirs side may exceed cfg.horizon
@@ -531,12 +531,12 @@ async function run(overrideConfig) {
 
         const latencyRows = [
             {
-                engine: 'theirs (ONNX INT8)', ep: theirs.ep,
+                engine: 'TFC (ONNX INT8)', ep: theirs.ep,
                 downloadMB: theirs.sizeBytes / 1e6,
                 cold: theirsCold.ms, warmMedian: median(theirsTimes), warmP90: p90(theirsTimes),
             },
             {
-                engine: `ours (t0-fast ${cfg.quant})`, ep: ours.ep,
+                engine: `II (t0-fast ${cfg.quant})`, ep: ours.ep,
                 downloadMB: ours.sizeBytes / 1e6,
                 cold: oursCold.ms, warmMedian: median(oursTimes), warmP90: p90(oursTimes),
             },
