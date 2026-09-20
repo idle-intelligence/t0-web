@@ -362,6 +362,73 @@ fn synthetic_case(seed: u64, idx: usize, t_ctx: usize) -> Vec<f32> {
     out
 }
 
+/// `drift --backend fast`: same synthetic-case/mean-drift-pct methodology
+/// as `cmd_drift`, but forecasting through `t0_fast::forecast` on both
+/// sides instead of a Burn `T0Model` -- lets a t0-fast GGUF-resident
+/// Q8_0/Q4_0 forecast be compared against the beta run doc's CPU
+/// (`ndarray`) drift numbers for the same weights. `quant` must be a
+/// `.gguf` path (no `int8-theirs`/safetensors-requant support here, unlike
+/// `cmd_drift` -- the fast engine only loads GGUF-resident or F32).
+#[cfg(feature = "fast")]
+fn cmd_drift_fast(weights_f32_path: &Path, config_path: &Path, quant: &str, n_cases: usize, seed: u64) -> Result<()> {
+    // Two separate engines (each its own `Pool`): `linear()` uses a
+    // different-sized uniform struct for F32 (`LinearDims`, 16 bytes) vs
+    // quantized (`LinearQDims`, 32 bytes) weights, and `Pool::uniform`
+    // never grows an already-allocated buffer -- sharing one pool's keys
+    // between the two models here would overrun the smaller allocation.
+    let f32_engine = t0_fast::Engine::new()?;
+    let quant_engine = t0_fast::Engine::new()?;
+    let (f32_weights, config) = Weights::load_auto(weights_f32_path, Some(config_path))?;
+    let f32_model = t0_fast::load_model(&f32_engine, &f32_weights, config, t0_fast::WeightQuant::F32)?;
+
+    let quant_path = Path::new(quant);
+    let size_bytes = std::fs::metadata(quant_path)?.len();
+    let bytes = std::fs::read(quant_path)?;
+    let quant_model = t0_fast::load_model_from_gguf(&quant_engine, &bytes)?;
+
+    let t_ctx = 512usize;
+    let horizon = 96usize;
+
+    let mut mean_drifts = Vec::with_capacity(n_cases);
+    let mut point_drifts = Vec::with_capacity(n_cases);
+    for i in 0..n_cases {
+        let context = synthetic_case(seed, i, t_ctx);
+        let reference = t0_fast::forecast(&f32_engine, &f32_model, &context, 1, t_ctx, horizon)?;
+        let quantized = t0_fast::forecast(&quant_engine, &quant_model, &context, 1, t_ctx, horizon)?;
+        assert_eq!(reference.len(), quantized.len());
+
+        let range = reference.iter().cloned().fold(f32::MIN, f32::max) - reference.iter().cloned().fold(f32::MAX, f32::min);
+        let range = range.max(1e-6);
+
+        let mut mean_drift = 0.0f32;
+        let mut point_drift = 0.0f32;
+        for (r, q) in reference.iter().zip(&quantized) {
+            let drift = (r - q).abs() / range;
+            mean_drift += drift;
+            point_drift = point_drift.max(drift);
+        }
+        mean_drift /= reference.len() as f32;
+        mean_drifts.push(mean_drift);
+        point_drifts.push(point_drift);
+    }
+
+    let mean_worst = mean_drifts.iter().cloned().fold(0.0f32, f32::max);
+    let mean_mean = mean_drifts.iter().sum::<f32>() / n_cases as f32;
+    let point_worst = point_drifts.iter().cloned().fold(0.0f32, f32::max);
+    let point_mean = point_drifts.iter().sum::<f32>() / n_cases as f32;
+
+    println!(
+        "backend=fast quant={quant} cases={n_cases} seed={seed} file_bytes={size_bytes} file_mb={:.1} \
+         mean_drift_worst_pct={:.4} mean_drift_mean_pct={:.4} point_drift_worst_pct={:.4} point_drift_mean_pct={:.4}",
+        size_bytes as f64 / 1e6,
+        mean_worst * 100.0,
+        mean_mean * 100.0,
+        point_worst * 100.0,
+        point_mean * 100.0,
+    );
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 fn cmd_drift(weights_f32_path: &Path, config_path: &Path, quant: &str, n_cases: usize, seed: u64) -> Result<()> {
     let config: T0Config = serde_json::from_str(&std::fs::read_to_string(config_path)?)?;
@@ -882,6 +949,10 @@ fn main() -> Result<()> {
         "drift" => {
             let weights_f32 = weights_f32.ok_or_else(|| anyhow!("--weights-f32 is required"))?;
             let config = config.ok_or_else(|| anyhow!("--config is required"))?;
+            #[cfg(feature = "fast")]
+            if backend == "fast" {
+                return cmd_drift_fast(&weights_f32, &config, &quant, cases, seed);
+            }
             cmd_drift(&weights_f32, &config, &quant, cases, seed)
         }
         _ => Err(anyhow!(
