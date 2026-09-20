@@ -99,7 +99,7 @@ t0-cli bench --weights t0-alpha-q4_0.gguf --backend ndarray --signals 1000 --con
 
 ## Publishing the demo
 
-`tools/publish-pages.sh` builds the `fast` wasm backend and republishes committed HEAD's `web/` (plus the built pkg) to an orphan `gh-pages` branch, following `../stt-web`'s layout (repo root = the served tree). Run it, then `git push origin gh-pages --force-with-lease`. GitHub Pages source: branch `gh-pages`, folder `/`.
+`tools/publish-pages.sh` builds both wasm engines (`fast` for WebGPU at `web/pkg-wgpu`, `ndarray` for CPU at `web/pkg`) and republishes committed HEAD's `web/` to an orphan `gh-pages` branch, following `../tts-web`'s layout (repo root = the served tree). Run it, then `git push origin gh-pages --force-with-lease`. GitHub Pages source: branch `gh-pages`, folder `/`.
 
 ## What's not done yet
 
