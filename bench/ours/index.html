@@ -78,8 +78,42 @@ async function benchOne(pkgDir, ggufUrl, backendLabel) {
   };
 }
 
+let __traceState = null;
+
+async function warmup(pkgDir, ggufUrl) {
+  const t0wasm = await import(`${pkgDir}/t0_wasm.js`);
+  await t0wasm.default();
+  await t0wasm.initBackend();
+  const modelBuf = await fetch(ggufUrl).then((r) => r.arrayBuffer());
+  const series = await loadSeries();
+  const origin = 3600;
+  const context = series.slice(origin - CONTEXT, origin);
+  const model = t0wasm.T0Wasm.load(new Uint8Array(modelBuf));
+  // a few warm calls before tracing so cold-start shader compile/autotune
+  // isn't in the traced window
+  for (let i = 0; i < 3; i++) await model.forecast(context, HORIZON);
+  __traceState = { model, context };
+}
+
+async function oneForecast() {
+  performance.mark('t0-forecast-start');
+  await __traceState.model.forecast(__traceState.context, HORIZON);
+  performance.mark('t0-forecast-end');
+  performance.measure('t0-forecast', 't0-forecast-start', 't0-forecast-end');
+}
+
+async function oneBatch() {
+  performance.mark('t0-batch-start');
+  await __traceState.model.forecastBatch(__traceState.context, N_BATCH, HORIZON, CHUNK);
+  performance.mark('t0-batch-end');
+  performance.measure('t0-batch', 't0-batch-start', 't0-batch-end');
+}
+
 window.__bench = {
   benchOne,
+  warmup,
+  oneForecast,
+  oneBatch,
 };
 
 log('ready');
