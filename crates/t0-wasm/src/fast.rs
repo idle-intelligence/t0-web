@@ -61,6 +61,23 @@ impl T0Wasm {
         Ok(T0Wasm { model })
     }
 
+    /// F32-residency reference build: `safetensors_bytes` is the raw,
+    /// never-quantized `model.safetensors` (the same file `t0-cli
+    /// export-gguf` reads from), `config_json` its sibling `config.json`
+    /// text. No dequant-then-requantize round trip anywhere -- this is the
+    /// actual reference weights, not a Q8_0/Q4_0 GGUF dequantized back to
+    /// f32 -- so a `forecast()` from this build is the ground truth
+    /// `bench/compare`'s agreement table checks the Q8_0/Q4_0 GGUF builds
+    /// against.
+    #[wasm_bindgen(js_name = loadF32)]
+    pub fn load_f32(safetensors_bytes: &[u8], config_json: &str) -> Result<T0Wasm, JsValue> {
+        console_error_panic_hook::set_once();
+        let weights = t0_core::Weights::load_bytes(safetensors_bytes).map_err(to_js_err)?;
+        let config: t0_core::T0Config = serde_json::from_str(config_json).map_err(|e| JsValue::from_str(&format!("{e:#}")))?;
+        let model = t0_fast::load_model(&engine(), &weights, config, t0_fast::WeightQuant::F32).map_err(to_js_err)?;
+        Ok(T0Wasm { model })
+    }
+
     #[wasm_bindgen(js_name = nQuantiles)]
     pub fn n_quantiles(&self) -> usize {
         self.model.config.n_quantiles()
