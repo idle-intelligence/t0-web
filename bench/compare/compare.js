@@ -71,48 +71,42 @@ let state = {
 };
 
 // ---- UI scaffolding ----
+function addRadioChoice(container, name, text, checked, onChange) {
+    const label = document.createElement('label');
+    const input = document.createElement('input');
+    input.type = 'radio';
+    input.name = name;
+    input.checked = checked;
+    input.addEventListener('change', onChange);
+    label.appendChild(input);
+    label.appendChild(document.createTextNode(text));
+    container.appendChild(label);
+}
+
 const chChoices = document.getElementById('chChoices');
 CH_OPTIONS.forEach((opt, i) => {
-    const b = document.createElement('button');
-    b.className = 'choice-btn' + (i === 0 ? ' active' : '');
-    b.textContent = `${opt.context}/${opt.horizon}`;
-    b.onclick = () => {
-        [...chChoices.children].forEach((c) => c.classList.remove('active'));
-        b.classList.add('active');
+    addRadioChoice(chChoices, 'ch', `${opt.context}/${opt.horizon}`, i === 0, () => {
         state.context = opt.context;
         state.horizon = opt.horizon;
-    };
-    chChoices.appendChild(b);
+    });
 });
 
 const quantChoices = document.getElementById('quantChoices');
 ['q8_0', 'q4_0'].forEach((q, i) => {
-    const b = document.createElement('button');
-    b.className = 'choice-btn' + (i === 0 ? ' active' : '');
-    b.textContent = q;
-    b.onclick = () => {
-        [...quantChoices.children].forEach((c) => c.classList.remove('active'));
-        b.classList.add('active');
+    addRadioChoice(quantChoices, 'quant', q, i === 0, () => {
         state.quant = q;
-    };
-    quantChoices.appendChild(b);
+    });
 });
 
 const seriesChoices = document.getElementById('seriesChoices');
 const pasteArea = document.getElementById('pasteArea');
 const pasteLabel = document.getElementById('pasteLabel');
 ['us_births (fixture)', 'paste your own'].forEach((label, i) => {
-    const b = document.createElement('button');
-    b.className = 'choice-btn' + (i === 0 ? ' active' : '');
-    b.textContent = label;
-    b.onclick = () => {
-        [...seriesChoices.children].forEach((c) => c.classList.remove('active'));
-        b.classList.add('active');
+    addRadioChoice(seriesChoices, 'series', label, i === 0, () => {
         state.usePasted = i === 1;
         pasteArea.style.display = state.usePasted ? 'block' : 'none';
         pasteLabel.style.display = state.usePasted ? 'block' : 'none';
-    };
-    seriesChoices.appendChild(b);
+    });
 });
 
 document.getElementById('runBtn').onclick = () => run();
@@ -572,7 +566,7 @@ async function run(overrideConfig) {
     }
 }
 
-setStatus('ready', 'ready — choose context/horizon and quant, then run');
+setStatus('ready', 'ready, choose context, horizon and quant, then run');
 
 window.__app = {
     run,
