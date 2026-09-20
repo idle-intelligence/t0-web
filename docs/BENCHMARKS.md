@@ -364,3 +364,41 @@ CRPS (`mean_weighted_sum_quantile_loss`) / MASE per config:
 Both quants track the f32 reference to within ~0.4% on the aggregate for both metrics, no config regresses more than ~1.5% relative — consistent with alpha's own subset finding that CRPS/MASE are far less quant-sensitive than the raw drift metric above. This subset (8 energy/weather/transport-heavy daily/weekly configs) is not the published 97-config GIFT-Eval protocol, so its absolute CRPS/MASE (~0.075 / ~1.05) are not comparable to the published beta numbers (CRPS 0.4738 / MASE 0.6865, `docs/reports/t0-published-numbers.md`) — same caveat as alpha's subset table. What this subset does support: our quantization does not measurably hurt beta's accuracy at the official 8192-context protocol, same conclusion as alpha.
 
 Commands, full timing breakdown per config: `docs/runs/2026-09-20-beta.md`.
+
+## Beta on t0-fast (WGSL/raw-wgpu engine, native)
+
+- Machine: Apple M2 (Darwin 25.3.0), Apple Metal via raw `wgpu`
+  (`crates/t0-fast`, not Burn), no other GPU job running. Commit `f99e3bb`
+  (fixed a `HEAD_DIM=64` hardcode in `crates/t0-fast` that previously
+  blocked beta entirely — see `docs/runs/2026-09-20-beta-fast.md`).
+- Command shape: `t0-cli bench --backend fast --fast-quant <q8_0|q4_0>
+  --signals <1|24> --context 512 --horizon 32 --chunk 24 --reps 20
+  --warmup 3`, median of 20 reps after 3 warmup reps, alpha and beta run
+  in the same session for direct comparability.
+
+Parity (max-abs quantile error, gate <=1e-4 for F32):
+
+| model | quant | worst-case max-abs err |
+|---|---|---|
+| t0-alpha | f32 | 1.251698e-6 |
+| t0-beta | f32 | 3.218651e-6 |
+| t0-beta | q8_0 | 3.337860e-6 |
+| t0-beta | q4_0 | 3.218651e-6 |
+
+Native latency, median of 20 reps (ms/signal):
+
+| model | quant | single | batch-24 |
+|---|---|---|---|
+| t0-alpha | q8_0 | 102.5555 | 22.9002 |
+| t0-alpha | q4_0 | 73.1752 | 22.9805 |
+| t0-beta | q8_0 | 219.2922 | 54.6319 |
+| t0-beta | q4_0 | 145.2537 | 54.5032 |
+
+Beta's F32 parity passes the same 1e-4 gate as alpha, at the same 1e-6
+order of magnitude. Beta's single-forecast latency is ~2.0x-2.1x alpha's
+at matched context/horizon (Q8_0 2.14x, Q4_0 1.99x); batch-24 per-signal
+latency is ~2.4x higher for beta (Q8_0 2.39x, Q4_0 2.37x). Drift on
+t0-fast matches the CPU/Burn reference path
+(`docs/runs/2026-09-20-beta.md`) to 3 significant digits for both Q8_0
+(0.2047% vs 0.2046% mean-drift-worst) and Q4_0 (2.5494% vs 2.5493%). Full
+detail: `docs/runs/2026-09-20-beta-fast.md`.
