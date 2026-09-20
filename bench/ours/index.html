@@ -67,9 +67,14 @@ async function benchOne(pkgDir, ggufUrl, backendLabel) {
     batch = { error: e.message || String(e) };
   }
 
+  // t0-fast only (see crates/t0-wasm/src/fast.rs) -- absent on the Burn
+  // builds, so this is undefined there rather than an error.
+  const gpuBytes = typeof model.gpuBytes === 'function' ? model.gpuBytes() : undefined;
+
   return {
     backend: backendLabel,
     sizeBytes,
+    gpuBytes,
     cold,
     warmMedian,
     warmAll: times,

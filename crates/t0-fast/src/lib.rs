@@ -35,6 +35,14 @@ pub fn load_model(engine: &Engine, weights: &Weights, config: T0Config, quant: W
     GpuModel::load(engine, weights, config, quant)
 }
 
+/// Loads a `t0-cli export-gguf` file with the big matmuls kept resident at
+/// whatever quantization the GGUF already has (Q8_0/Q4_0) -- no
+/// dequantize-then-requantize round trip. See
+/// `GpuModel::load_from_gguf_bytes`'s doc comment.
+pub fn load_model_from_gguf(engine: &Engine, gguf_bytes: &[u8]) -> Result<GpuModel> {
+    GpuModel::load_from_gguf_bytes(engine, gguf_bytes)
+}
+
 /// Shared core of `forecast_async`/`forecast_batch_chunked_async`: pad,
 /// scale, forward, rescale, and slice the forecast region back out of one
 /// already-built `TimeSeries` window. Mirrors

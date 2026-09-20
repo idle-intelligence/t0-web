@@ -56,6 +56,15 @@ impl Pool {
         self.alloc_count.get()
     }
 
+    /// Sum of every pooled buffer's current size -- the per-forward
+    /// working set (activations, masks, RoPE tables, uniforms), not the
+    /// model's persistent weights. Meaningful after at least one forward
+    /// call (the pool starts empty and grows to its steady-state shape on
+    /// the first call at a given `(v, p)`).
+    pub fn resident_bytes(&self) -> u64 {
+        self.buffers.borrow().values().map(|b| b.size()).sum()
+    }
+
     fn bump_generation(&self) {
         self.generation.set(self.generation.get() + 1);
         self.alloc_count.set(self.alloc_count.get() + 1);
