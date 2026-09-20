@@ -393,7 +393,7 @@
             console.log(`[t0] ${text}`);
         }
         function formatBackend(b) {
-            return b === 'webgpu' ? 'WebGPU' : b;
+            return b === 'webgpu' ? 'engine: WebGPU' : 'engine: CPU (wasm)';
         }
 
         function formatBytes(bytes) {
@@ -875,7 +875,7 @@
                     metricSize.textContent = formatBytes(msg.modelBytes);
                     metricBackend.textContent = msg.backend;
                     setDot('ready');
-                    setStatus(`model loaded, ${formatBackend(msg.backend)}`);
+                    setStatus(`ready, ${formatBackend(msg.backend)}`);
                     window.__app.ready = true;
                     modelSwitching = false;
                     currentModelKey = msg.modelKey;
