@@ -1,0 +1,23 @@
+[package]
+name = "t0-fast"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = []
+wasm = ["wgpu/webgpu"]
+
+[dependencies]
+t0-core = { path = "../t0-core" }
+wgpu = { version = "26.0" }
+bytemuck = { version = "1.25", features = ["derive"] }
+futures-channel = "0.3"
+half = "2.4"
+anyhow = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+pollster = "0.3"
+
+[dev-dependencies]
+serde_json = { workspace = true }

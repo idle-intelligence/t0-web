@@ -12,9 +12,11 @@ path = "src/main.rs"
 default = ["ndarray"]
 ndarray = ["burn-ndarray"]
 wgpu = ["burn-wgpu"]
+fast = ["dep:t0-fast", "dep:pollster"]
 
 [dependencies]
 t0-core = { path = "../t0-core" }
+t0-fast = { path = "../t0-fast", optional = true }
 burn = { workspace = true }
 burn-ndarray = { workspace = true, optional = true }
 burn-wgpu = { workspace = true, optional = true }
@@ -22,6 +24,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 byteorder = { workspace = true }
 anyhow = { workspace = true }
+pollster = { version = "0.3", optional = true }
 
 [dev-dependencies]
 pollster = "0.3"

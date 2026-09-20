@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>t0-web — compare</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
+<script src="../onnx/ort.webgpu.min.js"></script>
+<style>
+:root {
+    --bg: #fdfdfd;
+    --text: #1a1a1a;
+    --muted: #555;
+    --faint: #999;
+    --border: #ddd;
+    --green: #2d7d46;
+    --yellow: #b58900;
+    --red: #c0392b;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: 'IBM Plex Sans', -apple-system, sans-serif;
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 48px 24px 96px;
+    color: var(--text);
+    background: var(--bg);
+    line-height: 1.5;
+    font-size: 15px;
+}
+a { color: var(--text); }
+a:hover { color: var(--muted); }
+header { margin-bottom: 48px; }
+.org {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+    color: var(--muted);
+    letter-spacing: 0.02em;
+    margin-bottom: 2px;
+}
+h1 { font-family: 'IBM Plex Mono', monospace; font-size: 24px; font-weight: 600; margin-bottom: 8px; }
+.tagline { color: var(--muted); font-size: 14px; line-height: 1.6; }
+section { border-top: 1px solid var(--border); padding: 24px 0; }
+section h2 {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    color: var(--faint);
+    margin-bottom: 12px;
+}
+.status { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--faint); flex-shrink: 0; }
+.status-dot.loading { background: var(--yellow); }
+.status-dot.ready { background: var(--green); }
+.status-dot.error { background: var(--red); }
+.status-dot.generating { background: var(--text); animation: pulse 1s infinite; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+.choice-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.choice-btn {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    padding: 8px 12px;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text);
+    text-align: center;
+}
+.choice-btn:hover:not(:disabled) { border-color: var(--text); }
+.choice-btn.active { background: var(--text); color: var(--bg); border-color: var(--text); }
+.choice-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+label { font-size: 13px; color: var(--muted); display: block; margin-bottom: 6px; }
+textarea {
+    width: 100%;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    padding: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+    resize: vertical;
+    min-height: 70px;
+}
+button.run {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+    font-weight: 500;
+    padding: 8px 16px;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text);
+    margin-top: 12px;
+}
+button.run:hover:not(:disabled) { border-color: var(--text); }
+button.run:disabled { opacity: 0.3; cursor: not-allowed; }
+table { width: 100%; border-collapse: collapse; font-size: 12px; font-family: 'IBM Plex Mono', monospace; margin-bottom: 16px; }
+th, td { text-align: right; padding: 4px 6px; border-bottom: 1px solid var(--border); }
+th:first-child, td:first-child { text-align: left; }
+th { color: var(--faint); font-weight: 500; }
+.note { font-size: 12px; color: var(--faint); margin: 4px 0 16px; line-height: 1.5; }
+canvas { display: block; width: 100%; }
+.io-chart { height: 240px; border: 1px solid var(--border); background: var(--bg); }
+.legend { display: flex; gap: 16px; margin-top: 8px; font-size: 12px; color: var(--muted); font-family: 'IBM Plex Mono', monospace; }
+.perf-line { font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--muted); margin-bottom: 4px; word-break: break-all; }
+</style>
+</head>
+<body>
+<header>
+    <p class="org">idle intelligence</p>
+    <h1>t0-web — compare</h1>
+    <p class="tagline">
+        theforecastingcompany's t0-alpha-onnx-int8 export (onnxruntime-web,
+        WebGPU EP with wasm fallback) vs our GGUF-resident t0-fast
+        (Q8_0/Q4_0), both loaded live in this tab.
+    </p>
+</header>
+
+<section>
+    <h2>STATUS</h2>
+    <div class="status">
+        <span class="status-dot" id="statusDot"></span>
+        <span id="statusText">Initializing...</span>
+    </div>
+</section>
+
+<section>
+    <h2>INPUT</h2>
+    <label>context / horizon</label>
+    <div class="choice-row" id="chChoices"></div>
+    <label>ours quantization</label>
+    <div class="choice-row" id="quantChoices"></div>
+    <label>series</label>
+    <div class="choice-row" id="seriesChoices"></div>
+    <label id="pasteLabel" style="display:none">one number per line (last N = context used)</label>
+    <textarea id="pasteArea" style="display:none" placeholder="12345&#10;12401&#10;..."></textarea>
+    <button class="run" id="runBtn">run</button>
+</section>
+
+<section>
+    <h2>OUTPUT — latency</h2>
+    <table id="latencyTable">
+        <thead>
+            <tr><th>engine</th><th>ep/backend</th><th>download MB</th><th>cold ms</th><th>warm median ms</th><th>warm p90 ms</th></tr>
+        </thead>
+        <tbody></tbody>
+    </table>
+    <h2>OUTPUT — batch 24</h2>
+    <table id="batchTable">
+        <thead>
+            <tr><th>engine</th><th>ms total</th><th>ms/signal</th><th>note</th></tr>
+        </thead>
+        <tbody></tbody>
+    </table>
+    <h2>OUTPUT — agreement (theirs vs ours)</h2>
+    <table id="agreeTable">
+        <thead>
+            <tr><th>quantile</th><th>max-abs diff</th><th>max-abs % range</th><th>mean-abs diff</th><th>mean-abs % range</th></tr>
+        </thead>
+        <tbody></tbody>
+    </table>
+    <div class="io-chart"><canvas id="overlayChart"></canvas></div>
+    <div class="legend">
+        <span id="legendTheirs">— theirs (median, Q10-Q90)</span>
+        <span id="legendOurs">- - ours (median, Q10-Q90)</span>
+    </div>
+</section>
+
+<section>
+    <h2>PERFORMANCE</h2>
+    <div class="perf-line" id="perfUA"></div>
+    <div class="perf-line" id="perfGPU"></div>
+    <div class="perf-line" id="perfTime"></div>
+</section>
+
+<script type="module" src="./compare.js"></script>
+</body>
+</html>

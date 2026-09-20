@@ -62,6 +62,55 @@ impl Quant {
     }
 }
 
+/// Recovers `T0Config` from a GGUF file's `t0.*` metadata keys (written by
+/// `export_gguf` below). Shared by `Weights::load_gguf_bytes` and
+/// `t0-fast`'s own GGUF loader (which keeps the big matmuls' quantized
+/// bytes resident instead of dequantizing everything to f32 first).
+pub fn config_from_gguf_metadata(meta: &HashMap<String, MetaValue>) -> Result<T0Config> {
+    let get_u32 = |k: &str| -> Result<usize> {
+        match meta.get(k) {
+            Some(MetaValue::U32(v)) => Ok(*v as usize),
+            _ => bail!("gguf: missing or wrong-typed metadata key {k}"),
+        }
+    };
+    let get_f32 = |k: &str, default: f32| -> f32 {
+        match meta.get(k) {
+            Some(MetaValue::F32(v)) => *v,
+            _ => default,
+        }
+    };
+    let get_bool = |k: &str, default: bool| -> bool {
+        match meta.get(k) {
+            Some(MetaValue::Bool(v)) => *v,
+            _ => default,
+        }
+    };
+    let get_string = |k: &str, default: &str| -> String {
+        match meta.get(k) {
+            Some(MetaValue::String(v)) => v.clone(),
+            _ => default.to_string(),
+        }
+    };
+    let quantile_levels = match meta.get("t0.quantile_levels") {
+        Some(MetaValue::ArrayF32(v)) => v.clone(),
+        _ => bail!("gguf: missing t0.quantile_levels metadata"),
+    };
+
+    Ok(T0Config {
+        embed_dim: get_u32("t0.embed_dim")?,
+        num_layers: get_u32("t0.num_layers")?,
+        num_heads: get_u32("t0.num_heads")?,
+        mlp_hidden_dim: get_u32("t0.mlp_hidden_dim")?,
+        patch_size: get_u32("t0.patch_size")?,
+        group_every_n: get_u32("t0.group_every_n")? as i64,
+        dropout: get_f32("t0.dropout", 0.0),
+        quantile_levels,
+        scaler_use_arcsinh: get_bool("t0.scaler_use_arcsinh", true),
+        scaler_eps: get_f32("t0.scaler_eps", 0.1),
+        scaler_eps_mode: get_string("t0.scaler_eps_mode", "variance_offset"),
+    })
+}
+
 impl Weights {
     pub fn load(path: &std::path::Path) -> Result<Self> {
         let bytes = std::fs::read(path).with_context(|| format!("reading {}", path.display()))?;
@@ -96,56 +145,13 @@ impl Weights {
         let file = gguf::read_gguf(&mut &bytes[..]).context("parsing gguf")?;
 
         let mut tensors = HashMap::with_capacity(file.tensors.len());
-        for (name, (shape, ty, data)) in file.tensors {
+        for (name, (shape, ty, data)) in &file.tensors {
             let n: usize = shape.iter().product();
-            let values = gguf::dequantize_for(ty, &data, n);
-            tensors.insert(name, (shape, values));
+            let values = gguf::dequantize_for(*ty, data, n);
+            tensors.insert(name.clone(), (shape.clone(), values));
         }
 
-        let meta = &file.metadata;
-        let get_u32 = |k: &str| -> Result<usize> {
-            match meta.get(k) {
-                Some(MetaValue::U32(v)) => Ok(*v as usize),
-                _ => bail!("gguf: missing or wrong-typed metadata key {k}"),
-            }
-        };
-        let get_f32 = |k: &str, default: f32| -> f32 {
-            match meta.get(k) {
-                Some(MetaValue::F32(v)) => *v,
-                _ => default,
-            }
-        };
-        let get_bool = |k: &str, default: bool| -> bool {
-            match meta.get(k) {
-                Some(MetaValue::Bool(v)) => *v,
-                _ => default,
-            }
-        };
-        let get_string = |k: &str, default: &str| -> String {
-            match meta.get(k) {
-                Some(MetaValue::String(v)) => v.clone(),
-                _ => default.to_string(),
-            }
-        };
-        let quantile_levels = match meta.get("t0.quantile_levels") {
-            Some(MetaValue::ArrayF32(v)) => v.clone(),
-            _ => bail!("gguf: missing t0.quantile_levels metadata"),
-        };
-
-        let config = T0Config {
-            embed_dim: get_u32("t0.embed_dim")?,
-            num_layers: get_u32("t0.num_layers")?,
-            num_heads: get_u32("t0.num_heads")?,
-            mlp_hidden_dim: get_u32("t0.mlp_hidden_dim")?,
-            patch_size: get_u32("t0.patch_size")?,
-            group_every_n: get_u32("t0.group_every_n")? as i64,
-            dropout: get_f32("t0.dropout", 0.0),
-            quantile_levels,
-            scaler_use_arcsinh: get_bool("t0.scaler_use_arcsinh", true),
-            scaler_eps: get_f32("t0.scaler_eps", 0.1),
-            scaler_eps_mode: get_string("t0.scaler_eps_mode", "variance_offset"),
-        };
-
+        let config = config_from_gguf_metadata(&file.metadata)?;
         Ok((Weights { tensors }, config))
     }
 
@@ -254,6 +260,14 @@ impl Weights {
 
     fn raw(&self, name: &str) -> Result<&(Vec<usize>, Vec<f32>)> {
         self.tensors.get(name).ok_or_else(|| anyhow!("missing tensor: {name}"))
+    }
+
+    /// Raw shape + f32 data for a tensor, with no Burn `Backend` involved.
+    /// For `t0-fast`, which uploads weights straight into `wgpu::Buffer`s
+    /// and never builds a Burn tensor.
+    pub fn get_raw(&self, name: &str) -> Result<(&[usize], &[f32])> {
+        let (shape, data) = self.raw(name)?;
+        Ok((shape.as_slice(), data.as_slice()))
     }
 
     pub fn shape(&self, name: &str) -> Result<Vec<usize>> {

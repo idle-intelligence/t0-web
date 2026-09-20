@@ -50,7 +50,15 @@ def write_f32(path: Path, arr: np.ndarray) -> None:
     path.write_bytes(data.tobytes())
 
 
-def make_case(name: str, context: np.ndarray, model: T0Forecaster) -> dict:
+def make_case(
+    name: str,
+    context: np.ndarray,
+    model: T0Forecaster,
+    *,
+    context_len: int = CONTEXT_LEN,
+    horizon: int = HORIZON,
+    quantile_levels: tuple[float, ...] = QUANTILE_LEVELS,
+) -> dict:
     """context: (v, context_len) float32, NaN = missing observation."""
     v = context.shape[0]
     ctx_tensor = torch.from_numpy(context.astype(np.float32))
@@ -70,9 +78,9 @@ def make_case(name: str, context: np.ndarray, model: T0Forecaster) -> dict:
     try:
         forecast = model.predict(
             ctx_tensor,
-            horizon=HORIZON,
-            quantile_levels=QUANTILE_LEVELS,
-            context_length=CONTEXT_LEN,
+            horizon=horizon,
+            quantile_levels=quantile_levels,
+            context_length=context_len,
         )
     finally:
         h1.remove()
@@ -81,7 +89,7 @@ def make_case(name: str, context: np.ndarray, model: T0Forecaster) -> dict:
     quantiles = forecast.quantiles.detach().to(torch.float32).cpu().numpy()
     # forecast.quantiles is (targets, horizon, Q) for the (1,T) case or
     # (1, V, horizon, Q) for the (1,V,T) case; normalize to (v, horizon, Q).
-    quantiles = quantiles.reshape(v, HORIZON, len(QUANTILE_LEVELS))
+    quantiles = quantiles.reshape(v, horizon, len(quantile_levels))
 
     patch_embedding = captured["patch_embedding"]  # (v, n_patches, embed_dim)
     layer0_output = captured["layer0_output"]
@@ -96,6 +104,8 @@ def make_case(name: str, context: np.ndarray, model: T0Forecaster) -> dict:
         "name": name,
         "v": v,
         "n_patches": int(n_patches),
+        "context_len": context_len,
+        "horizon": horizon,
         "context_file": f"{name}_context.f32",
         "quantiles_file": f"{name}_quantiles.f32",
         "patch_embedding_file": f"{name}_patch_embedding.f32",
@@ -142,6 +152,37 @@ def main() -> None:
     }
     (FIXTURES / "manifest.json").write_text(json.dumps(manifest, indent=2))
     print(f"wrote {len(cases)} fixtures to {FIXTURES}")
+
+    # Long-horizon case: context 4096, well past model.max_horizon (1024) so
+    # T0Forecaster.predict actually drives RolloutManager's autoregressive
+    # loop (a horizon <= max_horizon, e.g. 480 as originally asked for,
+    # returns from RolloutManager.predict's first block and never touches
+    # the AR path at all -- see model/rollout.py's `if prediction_length <=
+    # horizon: return` -- so this exercises the rollout with horizon=1200
+    # instead, which needs two AR blocks after the max_horizon=1024 first
+    # one: round_up(1200,32)=1200 > 1024, so block 0 covers 1024, then one
+    # more block covers the remaining 176).
+    LONG_CONTEXT_LEN = 4096
+    LONG_HORIZON = 1200
+    t_long = np.arange(LONG_CONTEXT_LEN, dtype=np.float32)
+    ctx_long = (np.sin(2 * np.pi * t_long / 288.0) + 0.1 * rng.standard_normal(LONG_CONTEXT_LEN)).astype(np.float32)
+    long_case = make_case(
+        "case_long_rollout",
+        ctx_long[None, :],
+        model,
+        context_len=LONG_CONTEXT_LEN,
+        horizon=LONG_HORIZON,
+        quantile_levels=QUANTILE_LEVELS,
+    )
+    long_manifest = {
+        "reference": "tfc-t0 (PyPI) t0.model.model.T0Forecaster, theforecastingcompany/t0-alpha, "
+        "RolloutManager autoregressive path (t0/model/rollout.py)",
+        "patch_size": model.patch_size,
+        "quantile_levels": list(QUANTILE_LEVELS),
+        "cases": [long_case],
+    }
+    (FIXTURES / "manifest_long.json").write_text(json.dumps(long_manifest, indent=2))
+    print(f"wrote long-horizon fixture ({long_case['context_len']=}, {long_case['horizon']=}) to {FIXTURES}")
 
 
 if __name__ == "__main__":

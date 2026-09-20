@@ -2,8 +2,10 @@
 /.venv
 crates/t0-wasm/pkg/
 crates/t0-wasm/pkg-wgpu/
+crates/t0-wasm/pkg-fast/
 web/pkg/
 web/pkg-wgpu/
+web/pkg-fast/
 web/models/
 node_modules/
 __pycache__/
@@ -22,5 +24,6 @@ bench/onnx/*.f32
 bench/onnx/series_meta.json
 bench/ours/pkg/
 bench/ours/pkg-wgpu/
+bench/ours/pkg-fast/
 bench/ours/*.gguf
 bench/ours/*.f32

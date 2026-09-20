@@ -3797,6 +3797,7 @@ dependencies = [
  "serde",
  "serde_json",
  "t0-core",
+ "t0-fast",
 ]
 
 [[package]]
@@ -3815,6 +3816,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "t0-fast"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytemuck",
+ "futures-channel",
+ "half",
+ "pollster",
+ "serde_json",
+ "t0-core",
+ "wgpu",
+]
+
+[[package]]
 name = "t0-wasm"
 version = "0.1.0"
 dependencies = [
@@ -3825,6 +3840,7 @@ dependencies = [
  "console_error_panic_hook",
  "getrandom 0.3.4",
  "t0-core",
+ "t0-fast",
  "wasm-bindgen",
  "wasm-bindgen-futures",
 ]
