@@ -73,7 +73,7 @@ At load, every GGUF tensor is dequantized to f32 (`Weights::load_gguf`) — Burn
 
 ### wgpu runtime
 
-`t0-cli forecast|parity|bench --backend wgpu` (built with `cargo build -p t0-cli --release --no-default-features --features wgpu`) now actually executes on Metal via `burn-wgpu`, not just compiles. `--backend` is checked against the binary's compiled Cargo feature and errors out on a mismatch — backend selection stays a compile-time Cargo feature per this repo's CLAUDE.md, not a runtime switch (no dynamic dispatch between two different `Backend` types in one binary). Confirmed: wgpu F32 parity matches the PyTorch reference to the same order of magnitude as ndarray (worst-case 1.6e-6 vs ndarray's 1.2e-6), and wgpu vs ndarray agree to within ~1e-4 on both F32 and f16-GGUF inputs.
+`t0-cli forecast|parity|bench --backend wgpu` (built with `cargo build -p t0-cli --release --no-default-features --features wgpu`) now actually executes on Metal via `burn-wgpu`, not just compiles. `--backend` is checked against the binary's compiled Cargo feature and errors out on a mismatch — backend selection stays a compile-time Cargo feature, not a runtime switch (no dynamic dispatch between two different `Backend` types in one binary). Confirmed: wgpu F32 parity matches the PyTorch reference to the same order of magnitude as ndarray (worst-case 1.6e-6 vs ndarray's 1.2e-6), and wgpu vs ndarray agree to within ~1e-4 on both F32 and f16-GGUF inputs.
 
 ### Batch path
 
