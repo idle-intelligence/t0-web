@@ -129,6 +129,43 @@ threshold-calibration issue, not a functional bug); ours-vs-F32 and
 theirs-vs-F32 are blocked on the Pool-sharing bug above and are not
 gated this run.
 
+## Fixed in 89080e8 / 453e1d1 / follow-up session
+
+Both follow-ups from this doc's priority list are done: `89080e8` gives
+every `GpuModel` its own `Pool` (Engine's device/queue/pipelines stay
+shared, its `Pool` field is gone), and `453e1d1` makes the
+`forecastBatchRows` parity gate relative (max-abs / range <= 1e-5)
+instead of the miscalibrated absolute 1e-4. Two native regression tests
+(`crates/t0-fast/tests/pool_isolation.rs`, `#[ignore]`d, needs
+`bench/ours/` fixtures) load a Q8_0 GGUF model and an F32 safetensors
+model against one shared `Engine`, alternate forecast calls A,B,A,B, and
+assert each equals its own standalone-model baseline bit-for-bit.
+
+Re-ran the headless compare gate functionally (`node
+scripts/headless/run_compare_bench.mjs --url
+http://127.0.0.1:8046/bench/compare/ --context 512 --horizon 32 --quant
+q8_0`, `pkg-fast` rebuilt from `453e1d1` and synced to `bench/ours/`) --
+GPU marker not checked, no timing recorded, machine had another Chrome
+process running. All three gates passed:
+
+| comparison | overall max-abs | overall max-abs % range | overall mean-abs | overall mean-abs % range |
+|---|---|---|---|---|
+| theirs (INT8) vs ours (Q8_0) | 20.07 | 0.883% | 6.46 | 0.284% |
+| ours (Q8_0) vs F32 reference | 4.47 | 0.197% | 1.73 | 0.076% |
+| theirs (INT8) vs F32 reference | 17.99 | 0.791% | 5.69 | 0.250% |
+
+forecastBatchRows row parity: max-abs 0.001953125 / range 2817.506 =
+6.93e-7 relative, well under the 1e-5 gate (same absolute diff as the
+original run, now correctly read as float32-rounding noise, not a
+failure).
+
+The numbers land exactly where the earlier "72% divergence is
+implausible" reasoning predicted: ours-vs-F32 (0.076% mean) is smaller
+than theirs-vs-F32 (0.250% mean), consistent with Q8_0 being a milder
+quantization than the ONNX INT8 export, and both are now within the same
+order of magnitude as theirs-vs-ours (0.284% mean) rather than 72% of
+range.
+
 ## Performance panel (this run's machine)
 
 - UA: `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.0.0 Safari/537.36`
