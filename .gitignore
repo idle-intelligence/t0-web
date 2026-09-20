@@ -12,3 +12,13 @@ __pycache__/
 fixtures/gifteval/*.f32
 fixtures/gifteval/scores_*.csv
 fixtures/gifteval/forecasts_*/
+bench/onnx/*.onnx
+bench/onnx/ort*.js
+bench/onnx/ort*.mjs
+bench/onnx/ort-wasm*
+bench/onnx/*.f32
+bench/onnx/series_meta.json
+bench/ours/pkg/
+bench/ours/pkg-wgpu/
+bench/ours/*.gguf
+bench/ours/*.f32
