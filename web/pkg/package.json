@@ -1,0 +1,16 @@
+{
+  "name": "t0-wasm",
+  "type": "module",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "files": [
+    "t0_wasm_bg.wasm",
+    "t0_wasm.js",
+    "t0_wasm.d.ts"
+  ],
+  "main": "t0_wasm.js",
+  "types": "t0_wasm.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

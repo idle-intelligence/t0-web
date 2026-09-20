@@ -1,0 +1,181 @@
+/**
+ * Web Worker: loads the t0-wasm module and model, runs every forecast.
+ *
+ * All inference runs here, never on the main thread (see this repo's
+ * CLAUDE.md Demo section).
+ *
+ * Protocol:
+ *   Main -> Worker:
+ *     { type: 'load' }                                    -- fetch WASM + model + series, init
+ *     { type: 'forecast', origin: number, requestId: number } -- forecast from this split point
+ *
+ *   Worker -> Main:
+ *     { type: 'status', text: string, key?: string }  -- key present => update that one log line in place
+ *     { type: 'ready', series, seriesName, startDate, freq, modelBytes, loadMs, nQuantiles, contextCap, horizon, backend }
+ *     { type: 'forecast', origin, originDate, requestId, quantiles, nQuantiles, horizon, ms }
+ *     { type: 'error', message: string }
+ */
+
+const MODEL_URL = new URL('./models/t0-alpha-q8_0.gguf', import.meta.url).href;
+const SERIES_URL = new URL('./data/series.f32', import.meta.url).href;
+const SERIES_META_URL = new URL('./data/series_meta.json', import.meta.url).href;
+const CACHE_NAME = 't0-model-v1';
+
+// Context is capped at the same 512 used by docs/BENCHMARKS.md's latency
+// table; horizon 32 matches it too, so this demo's per-forecast ms is
+// directly comparable to that native CPU number. The chart only ever
+// *displays* the trailing 160 context points (see index.html) -- the model
+// still sees up to CONTEXT_CAP points.
+const CONTEXT_CAP = 512;
+const HORIZON = 32;
+
+let t0wasm = null;
+let model = null;
+let series = null;
+let seriesMeta = null;
+
+// freq is always 'D' for this bundled series (us_births) -- date-per-index
+// is start_date + index days, no calendar-skip frequencies supported here.
+function dateAtIndex(i) {
+    const start = new Date(seriesMeta.start_date.replace(' ', 'T') + 'Z');
+    const d = new Date(start.getTime() + i * 86400000);
+    return d.toISOString().slice(0, 10);
+}
+
+self.onmessage = async (e) => {
+    const { type, ...data } = e.data;
+    try {
+        if (type === 'load') {
+            await handleLoad();
+        } else if (type === 'forecast') {
+            await handleForecast(data.origin, data.requestId);
+        } else {
+            console.warn('[worker] unknown message type:', type);
+        }
+    } catch (err) {
+        self.postMessage({ type: 'error', message: err.message || String(err) });
+    }
+};
+
+async function cachedFetch(url, label) {
+    const cache = await caches.open(CACHE_NAME);
+    const cached = await cache.match(url);
+    if (cached) {
+        self.postMessage({ type: 'status', key: 'download', text: `${label} (cached)` });
+        return await cached.arrayBuffer();
+    }
+
+    const resp = await fetch(url);
+    if (!resp.ok) {
+        throw new Error(`fetch ${url}: ${resp.status} ${resp.statusText}`);
+    }
+    const contentLength = parseInt(resp.headers.get('Content-Length') || '0', 10);
+    const reader = resp.body.getReader();
+    const chunks = [];
+    let loaded = 0;
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        loaded += value.byteLength;
+        if (contentLength > 0) {
+            const pct = ((loaded / contentLength) * 100).toFixed(0);
+            self.postMessage({ type: 'status', key: 'download', text: `${label}: ${pct}%` });
+        }
+    }
+    const buf = new Uint8Array(loaded);
+    let offset = 0;
+    for (const chunk of chunks) {
+        buf.set(chunk, offset);
+        offset += chunk.byteLength;
+    }
+    try {
+        await cache.put(url, new Response(buf.buffer, { headers: { 'Content-Type': 'application/octet-stream' } }));
+    } catch (cacheErr) {
+        console.warn('[worker] could not cache:', cacheErr);
+    }
+    return buf.buffer;
+}
+
+// Backend selection: WebGPU if this worker's `navigator.gpu` exists
+// (dedicated workers get their own WorkerNavigator with the same `gpu`
+// property as the window), else the CPU (burn-ndarray) build. Two
+// separate wasm-pack outputs -- `pkg-wgpu/` (built with
+// `--no-default-features --features wgpu`) and `pkg/` (default,
+// `ndarray`) -- since the backend is a compile-time Cargo feature, same
+// convention as `crates/cli`.
+const HAS_WEBGPU = typeof navigator !== 'undefined' && !!navigator.gpu;
+const BACKEND = HAS_WEBGPU ? 'webgpu' : 'wasm/ndarray';
+const PKG_DIR = HAS_WEBGPU ? './pkg-wgpu' : './pkg';
+
+async function handleLoad() {
+    self.postMessage({ type: 'status', text: `Loading WASM module (${BACKEND})...` });
+    const wasmJsUrl = new URL(`${PKG_DIR}/t0_wasm.js`, import.meta.url).href;
+    t0wasm = await import(wasmJsUrl);
+    await t0wasm.default();
+    // Must run before T0Wasm.load(): on wgpu this drives the async
+    // requestAdapter()/requestDevice() setup that WASM has no blocking
+    // executor for (see t0-wasm's initBackend doc comment); a no-op on
+    // ndarray.
+    await t0wasm.initBackend();
+
+    self.postMessage({ type: 'status', key: 'download', text: 'Downloading model (Q8_0, ~109 MB)...' });
+    const modelBuf = await cachedFetch(MODEL_URL, 'Downloading model');
+
+    self.postMessage({ type: 'status', key: 'load', text: 'Loading model...' });
+    const t0 = performance.now();
+    model = t0wasm.T0Wasm.load(new Uint8Array(modelBuf));
+    const loadMs = performance.now() - t0;
+    self.postMessage({ type: 'status', key: 'load', text: `Model loaded in ${loadMs.toFixed(0)} ms` });
+
+    self.postMessage({ type: 'status', key: 'series', text: 'Loading series...' });
+    const seriesBuf = await fetch(SERIES_URL).then((r) => r.arrayBuffer());
+    series = new Float32Array(seriesBuf);
+    seriesMeta = await fetch(SERIES_META_URL).then((r) => r.json());
+    self.postMessage({
+        type: 'status',
+        key: 'series',
+        text: `Series: ${seriesMeta.name} (${seriesMeta.n_points} points, ${seriesMeta.start_date.slice(0, 10)} to ${dateAtIndex(seriesMeta.n_points - 1)})`,
+    });
+
+    self.postMessage({ type: 'status', key: 'backend', text: `Backend: ${BACKEND}` });
+
+    self.postMessage({
+        type: 'ready',
+        series: Array.from(series),
+        seriesName: seriesMeta.name,
+        startDate: seriesMeta.start_date,
+        freq: seriesMeta.freq,
+        modelBytes: modelBuf.byteLength,
+        loadMs,
+        nQuantiles: model.nQuantiles(),
+        contextCap: CONTEXT_CAP,
+        horizon: HORIZON,
+        backend: BACKEND,
+    });
+}
+
+async function handleForecast(origin, requestId) {
+    if (!model || !series) {
+        self.postMessage({ type: 'error', message: 'forecast requested before model/series ready' });
+        return;
+    }
+    const ctxStart = Math.max(0, origin - CONTEXT_CAP);
+    const context = series.slice(ctxStart, origin);
+    const t0 = performance.now();
+    // model.forecast is always async now (t0-wasm's wgpu build needs a real
+    // async GPU readback; the ndarray build resolves the same Promise
+    // immediately) -- always `await`, never assume a sync return value.
+    const quantiles = await model.forecast(context, HORIZON);
+    const ms = performance.now() - t0;
+    self.postMessage({
+        type: 'forecast',
+        origin,
+        originDate: dateAtIndex(origin),
+        requestId,
+        quantiles: Array.from(quantiles),
+        nQuantiles: model.nQuantiles(),
+        horizon: HORIZON,
+        ms,
+    });
+}

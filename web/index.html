@@ -1,0 +1,801 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>t0-web — idle intelligence</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #fdfdfd;
+            --text: #1a1a1a;
+            --muted: #555;
+            --faint: #999;
+            --border: #ddd;
+            --green: #2d7d46;
+            --yellow: #b58900;
+            --red: #c0392b;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'IBM Plex Sans', -apple-system, sans-serif;
+            max-width: 640px;
+            margin: 0 auto;
+            padding: 48px 24px 96px;
+            color: var(--text);
+            background: var(--bg);
+            line-height: 1.5;
+            font-size: 15px;
+        }
+        a { color: var(--text); }
+        a:hover { color: var(--muted); }
+
+        header { margin-bottom: 48px; }
+        .org {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 13px;
+            color: var(--muted);
+            letter-spacing: 0.02em;
+            margin-bottom: 2px;
+        }
+        h1 {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 24px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+        .tagline {
+            color: var(--muted);
+            font-size: 14px;
+            line-height: 1.6;
+        }
+        .tagline a { text-decoration: underline; color: var(--muted); }
+        .tagline a:hover { color: var(--text); }
+        .repo {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 13px;
+            margin-top: 4px;
+        }
+        .repo a { color: var(--faint); text-decoration: none; }
+        .repo a:hover { color: var(--muted); }
+
+        section {
+            border-top: 1px solid var(--border);
+            padding: 24px 0;
+        }
+        section h2 {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 12px;
+            font-weight: 500;
+            letter-spacing: 0.04em;
+            color: var(--faint);
+            margin-bottom: 12px;
+        }
+        section h2 .sub {
+            font-weight: 400;
+        }
+
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+        }
+        #status-text {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .status-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--faint);
+            flex-shrink: 0;
+        }
+        .status-dot.loading { background: var(--yellow); }
+        .status-dot.ready { background: var(--green); }
+        .status-dot.error { background: var(--red); }
+        .status-dot.generating {
+            background: var(--text);
+            animation: pulse 1s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+        canvas {
+            display: block;
+            width: 100%;
+        }
+        .io-chart {
+            height: 220px;
+            border: 1px solid var(--border);
+            background: var(--bg);
+        }
+        #inputChart { cursor: crosshair; touch-action: none; }
+        .info {
+            font-size: 13px;
+            color: var(--faint);
+            margin-top: 12px;
+        }
+        .actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            align-items: center;
+            margin-top: 12px;
+        }
+        button {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 13px;
+            font-weight: 500;
+            padding: 8px 16px;
+            cursor: pointer;
+            border: 1px solid var(--border);
+            background: transparent;
+            color: var(--text);
+            border-radius: 0;
+            transition: border-color 0.15s;
+        }
+        button:hover:not(:disabled) {
+            border-color: var(--text);
+        }
+        button:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+        .series-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+        .series-btn {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 12px;
+            padding: 8px 12px;
+            cursor: pointer;
+            border: 1px solid var(--border);
+            background: transparent;
+            color: var(--text);
+            text-align: center;
+            transition: border-color 0.15s;
+        }
+        .series-btn:hover:not(:disabled) { border-color: var(--text); }
+        .series-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+        .series-btn.active {
+            background: var(--text);
+            color: var(--bg);
+            border-color: var(--text);
+        }
+        .legend {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            flex-wrap: wrap;
+            gap: 8px 16px;
+            margin-top: 10px;
+            font-size: 12px;
+            color: var(--muted);
+            font-family: 'IBM Plex Mono', monospace;
+        }
+        .legend .left span { margin-right: 12px; }
+        .legend .left span:last-child { margin-right: 0; }
+        .swatch-actual { color: var(--text); letter-spacing: 1px; }
+        .swatch-forecast { color: var(--muted); }
+        .swatch-band { color: #bbb; }
+        .panel-desc {
+            font-size: 12px;
+            color: var(--faint);
+            margin-top: 6px;
+            line-height: 1.5;
+        }
+
+        #metricsCard { display: none; }
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+        }
+        .metric { text-align: center; }
+        .metric-value {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 16px;
+            font-weight: 600;
+        }
+        .metric-label {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 11px;
+            color: var(--faint);
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            margin-top: 2px;
+        }
+
+        footer {
+            border-top: 1px solid var(--border);
+            padding-top: 24px;
+            margin-top: 24px;
+        }
+        footer .credit {
+            font-size: 13px;
+            color: var(--faint);
+            line-height: 1.6;
+            margin-bottom: 8px;
+        }
+        footer .credit a { text-decoration: underline; color: var(--faint); }
+        footer .credit a:hover { color: var(--muted); }
+        footer a {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 13px;
+            color: var(--faint);
+            text-decoration: none;
+        }
+        footer a:hover { color: var(--muted); }
+    </style>
+</head>
+<body>
+    <header>
+        <p class="org">idle intelligence</p>
+        <h1>t0-web</h1>
+        <p class="tagline">
+            <a href="https://huggingface.co/theforecastingcompany/t0-alpha">t0-alpha</a>,
+            quantized to 8 bit (~109 MB), forecasting one series in your browser;
+            WebGPU when available, otherwise CPU
+        </p>
+        <p class="repo">
+            <a href="https://github.com/idle-intelligence/t0-web">github.com/idle-intelligence/t0-web</a>
+        </p>
+    </header>
+
+    <section>
+        <h2>STATUS</h2>
+        <div class="status">
+            <span class="status-dot" id="statusDot"></span>
+            <span id="status-text">Initializing...</span>
+        </div>
+    </section>
+
+    <section>
+        <h2>INPUT <span class="sub">· US births, daily</span></h2>
+        <div class="series-grid" id="seriesGrid"></div>
+        <canvas id="inputChart" class="io-chart"></canvas>
+        <p class="info">US births per day, July to November 1988. Drag the origin to choose where the model forecasts from.</p>
+        <div class="actions">
+            <button id="forecastBtn" type="button" disabled>Forecast</button>
+        </div>
+    </section>
+
+    <section>
+        <h2>OUTPUT <span class="sub">· 32-day forecast</span></h2>
+        <canvas id="outputChart" class="io-chart"></canvas>
+        <div class="legend">
+            <span class="left">
+                <span><span class="swatch-actual">•••</span> actual</span>
+                <span><span class="swatch-forecast">—</span> forecast</span>
+                <span><span class="swatch-band">▮</span> Q10–Q90</span>
+            </span>
+            <span class="right">
+                inside band <span id="metricInside">—</span> ·
+                CRPS <span id="metricCrps">—</span> ·
+                vs weekly naive <span id="metricNaive">—</span>
+            </span>
+        </div>
+        <p class="panel-desc">Inside band: days whose real value fell within the 10–90% range; a well-calibrated band catches about 26 of 32. CRPS: error of the whole probabilistic forecast, in births per day, lower is better. Vs weekly naive: error relative to repeating last week; below 1 beats it.</p>
+    </section>
+
+    <section id="metricsCard">
+        <h2>PERFORMANCE</h2>
+        <div class="metrics-grid">
+            <div class="metric">
+                <div class="metric-value" id="metricMs">—</div>
+                <div class="metric-label">MS / FORECAST</div>
+            </div>
+            <div class="metric">
+                <div class="metric-value" id="metricSize">—</div>
+                <div class="metric-label">MODEL SIZE</div>
+            </div>
+            <div class="metric">
+                <div class="metric-value" id="metricBackend">—</div>
+                <div class="metric-label">BACKEND</div>
+            </div>
+        </div>
+    </section>
+
+    <footer>
+        <p class="credit">
+            Model: <a href="https://huggingface.co/theforecastingcompany/t0-alpha">t0-alpha</a>
+            by <a href="https://www.theforecastingcompany.ai">The Forecasting Company</a>, Apache-2.0.
+            Custom Rust inference compiled to WebAssembly.
+        </p>
+        <p class="credit">Data: US daily births, 1969–1988 (<a href="./data/README.md">source + license</a>).</p>
+        <a href="https://idleintelligence.org">idleintelligence.org</a>
+    </footer>
+
+    <script type="module">
+        const statusDot = document.getElementById('statusDot');
+        const statusTextEl = document.getElementById('status-text');
+        const seriesGrid = document.getElementById('seriesGrid');
+        const inputCanvas = document.getElementById('inputChart');
+        const inputCtx = inputCanvas.getContext('2d');
+        const outputCanvas = document.getElementById('outputChart');
+        const outputCtx = outputCanvas.getContext('2d');
+        const forecastBtn = document.getElementById('forecastBtn');
+        const metricsCard = document.getElementById('metricsCard');
+        const metricMs = document.getElementById('metricMs');
+        const metricSize = document.getElementById('metricSize');
+        const metricBackend = document.getElementById('metricBackend');
+        const metricInside = document.getElementById('metricInside');
+        const metricCrps = document.getElementById('metricCrps');
+        const metricNaive = document.getElementById('metricNaive');
+
+        const PAD_L = 44, PAD_R = 8, PAD_T = 10, PAD_B = 20;
+        const MIN_PRECEDING_DAYS = 60; // at least this many drawn days before the origin
+        const QLEVELS = [0.1, 0.25, 0.5, 0.75, 0.9]; // t0-alpha/t0-beta's trained quantile levels
+
+        // STATUS is a single line, replaced as state changes: "downloading
+        // model: N%" -> "model loaded, <backend>" -> "forecast in <ms> ms".
+        function setDot(state) {
+            statusDot.className = 'status-dot ' + state;
+        }
+        function setStatus(text) {
+            statusTextEl.textContent = text;
+            console.log(`[t0] ${text}`);
+        }
+        function formatBackend(b) {
+            return b === 'webgpu' ? 'WebGPU' : b;
+        }
+
+        function formatBytes(bytes) {
+            const mb = bytes / (1024 * 1024);
+            return `${mb.toFixed(1)} MB`;
+        }
+
+        const worker = new Worker('./worker.js', { type: 'module' });
+
+        let series = null;
+        let horizon = 32;
+        let nQuantiles = 5;
+        let seriesStartDate = null;
+
+        // The drawn history (July-November 1988) never changes. Only the
+        // origin -- where the forecast starts -- is draggable within it,
+        // clamped so at least MIN_PRECEDING_DAYS precede it and the horizon
+        // still ends by the last real day (see clampOrigin below).
+        let INPUT_WINDOW = null;
+        let ORIGIN = null;       // committed origin: drives the forecast data
+        let markerOrigin = null; // visual-only during drag/preview
+        let lastForecast = null;
+        let forecasting = false;
+        let requestIdCounter = 0;
+        let debounceTimer = null;
+
+        function dateAt(i) {
+            const start = new Date(seriesStartDate.replace(' ', 'T') + 'Z');
+            return new Date(start.getTime() + i * 86400000);
+        }
+        function dateToIndex(dateStr) {
+            const start = new Date(seriesStartDate.replace(' ', 'T') + 'Z');
+            const d = new Date(dateStr + 'T00:00:00Z');
+            return Math.round((d.getTime() - start.getTime()) / 86400000);
+        }
+
+        // Origin bounds: at least MIN_PRECEDING_DAYS drawn days precede it,
+        // and origin + horizon - 1 must not exceed the series' last index
+        // (the horizon has to end by the last real day, 1988-12-31).
+        function clampOrigin(o) {
+            if (!INPUT_WINDOW) return Math.round(o);
+            const lo = INPUT_WINDOW.start + MIN_PRECEDING_DAYS;
+            const hi = series.length - 1 - horizon + 1;
+            return Math.min(hi, Math.max(lo, Math.round(o)));
+        }
+
+        window.__app = {
+            ready: false,
+            lastForecast: null,
+            forecastCount: 0, // incremented once per accepted forecast response -- test hook
+            runForecast() {
+                runForecast();
+            },
+            originBounds() {
+                if (!INPUT_WINDOW) return null;
+                return { lo: INPUT_WINDOW.start + MIN_PRECEDING_DAYS, hi: series.length - horizon };
+            },
+            origin() {
+                return ORIGIN;
+            },
+            seriesChecksum() {
+                if (!series || !INPUT_WINDOW) return null;
+                let h = 0;
+                for (let i = INPUT_WINDOW.start; i <= INPUT_WINDOW.end; i++) h = (h * 31 + series[i]) % 1000000007;
+                return h;
+            },
+        };
+
+        // ---- canvas setup (devicePixelRatio-aware) ----
+        function fitCanvas(canvas, ctx) {
+            const dpr = window.devicePixelRatio || 1;
+            const rect = canvas.getBoundingClientRect();
+            canvas.width = Math.max(1, Math.round(rect.width * dpr));
+            canvas.height = Math.max(1, Math.round(rect.height * dpr));
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            return { w: rect.width, h: rect.height };
+        }
+
+        function drawGridlines(ctx, w, h, xAt, domain) {
+            const plotH = h - PAD_T - PAD_B;
+            const yAt = (v) => PAD_T + plotH - ((v - domain.lo) / (domain.hi - domain.lo)) * plotH;
+
+            ctx.strokeStyle = '#eee';
+            ctx.fillStyle = '#999';
+            ctx.font = '10px "IBM Plex Mono", monospace';
+            ctx.lineWidth = 1;
+            const nYTicks = 4;
+            for (let t = 0; t <= nYTicks; t++) {
+                const v = domain.lo + (t / nYTicks) * (domain.hi - domain.lo);
+                const y = yAt(v);
+                ctx.beginPath();
+                ctx.moveTo(PAD_L, y);
+                ctx.lineTo(w - PAD_R, y);
+                ctx.stroke();
+                ctx.fillText(Math.round(v).toLocaleString(), 2, y + 3);
+            }
+            return yAt;
+        }
+
+        function drawXTicks(ctx, w, h, xAt, start, end) {
+            ctx.strokeStyle = '#eee';
+            ctx.fillStyle = '#999';
+            let prevMonth = -1;
+            for (let i = start; i <= end; i++) {
+                const d = dateAt(i);
+                if (d.getUTCDate() === 1 && d.getUTCMonth() !== prevMonth) {
+                    prevMonth = d.getUTCMonth();
+                    const x = xAt(i);
+                    ctx.beginPath();
+                    ctx.moveTo(x, PAD_T);
+                    ctx.lineTo(x, h - PAD_B);
+                    ctx.stroke();
+                    const label = d.toLocaleDateString('en-US', { month: 'short' });
+                    ctx.textAlign = x > w - 30 ? 'right' : 'left';
+                    ctx.fillText(label, x > w - 30 ? x - 2 : x + 2, h - 6);
+                    ctx.textAlign = 'left';
+                }
+            }
+        }
+
+        // Origin bar: 1px dashed vertical line in family gray with a small
+        // hollow circle at the top (canvas-drawn, no native control; the
+        // drag hit area is the whole canvas, invisible).
+        function drawOriginMarker(ctx, x, h) {
+            ctx.strokeStyle = '#999';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([3, 3]);
+            ctx.beginPath();
+            ctx.moveTo(x, PAD_T);
+            ctx.lineTo(x, h - PAD_B);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.beginPath();
+            ctx.arc(x, PAD_T, 3.5, 0, Math.PI * 2);
+            ctx.strokeStyle = '#555';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+        }
+
+        // ---- INPUT: the fixed history window, July-November 1988. The
+        // drawn data never changes; only the origin marker moves over it.
+        // Days after the origin are drawn lighter so the split reads at a
+        // glance (still real history -- the model just never sees them).
+        function drawInputChart() {
+            const { w, h } = fitCanvas(inputCanvas, inputCtx);
+            inputCtx.clearRect(0, 0, w, h);
+            if (!series) return;
+            const { start, end } = INPUT_WINDOW;
+            const plotW = w - PAD_L - PAD_R;
+            const xAt = (i) => PAD_L + ((i - start) / (end - start)) * plotW;
+
+            let lo = Infinity, hi = -Infinity;
+            for (let i = start; i <= end; i++) { lo = Math.min(lo, series[i]); hi = Math.max(hi, series[i]); }
+            const pad = (hi - lo) * 0.1 || 1;
+            const domain = { lo: lo - pad, hi: hi + pad };
+            const yAt = drawGridlines(inputCtx, w, h, xAt, domain);
+            drawXTicks(inputCtx, w, h, xAt, start, end);
+
+            const o = markerOrigin ?? ORIGIN;
+            inputCtx.strokeStyle = '#1a1a1a';
+            inputCtx.lineWidth = 1.5;
+            inputCtx.beginPath();
+            for (let i = start; i <= o; i++) {
+                const x = xAt(i), y = yAt(series[i]);
+                if (i === start) inputCtx.moveTo(x, y); else inputCtx.lineTo(x, y);
+            }
+            inputCtx.stroke();
+
+            inputCtx.strokeStyle = '#ccc';
+            inputCtx.lineWidth = 1.5;
+            inputCtx.beginPath();
+            for (let i = o; i <= end; i++) {
+                const x = xAt(i), y = yAt(series[i]);
+                if (i === o) inputCtx.moveTo(x, y); else inputCtx.lineTo(x, y);
+            }
+            inputCtx.stroke();
+
+            drawOriginMarker(inputCtx, xAt(o), h);
+        }
+
+        // ---- OUTPUT: the horizon days from the chosen origin, own scale
+        // (stretched to fill the width). Median (solid mid-gray), Q10-Q90
+        // (+ Q25-Q75, drawn darker via overlap) bands, and the real
+        // continuation as black dots drawn on top -- shows whether the
+        // model anticipated what actually happened.
+        function drawOutputChart() {
+            const { w, h } = fitCanvas(outputCanvas, outputCtx);
+            outputCtx.clearRect(0, 0, w, h);
+            if (!series || !lastForecast || lastForecast.origin !== ORIGIN) return;
+            const { quantiles, horizon: hZ, nQuantiles: nq } = lastForecast;
+            const q = (t, qi) => quantiles[t * nq + qi];
+            const plotW = w - PAD_L - PAD_R;
+            const xAt = (t) => PAD_L + (t / (hZ - 1)) * plotW;
+
+            let lo = Infinity, hi = -Infinity;
+            for (const v of quantiles) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
+            for (let t = 0; t < hZ; t++) {
+                if (ORIGIN + t < series.length) { lo = Math.min(lo, series[ORIGIN + t]); hi = Math.max(hi, series[ORIGIN + t]); }
+            }
+            const pad = (hi - lo) * 0.1 || 1;
+            const domain = { lo: lo - pad, hi: hi + pad };
+            const yAt = drawGridlines(outputCtx, w, h, xAt, domain);
+            // xAt here maps a horizon step t (0..hZ-1), not an absolute
+            // series index -- drawXTicks assumes the two coincide (true for
+            // the INPUT chart), so tick x-positions are computed inline.
+            outputCtx.strokeStyle = '#eee';
+            outputCtx.fillStyle = '#999';
+            let prevMonth = -1;
+            for (let t = 0; t < hZ; t++) {
+                const d = dateAt(ORIGIN + t);
+                if (d.getUTCDate() === 1 && d.getUTCMonth() !== prevMonth) {
+                    prevMonth = d.getUTCMonth();
+                    const x = xAt(t);
+                    outputCtx.beginPath();
+                    outputCtx.moveTo(x, PAD_T);
+                    outputCtx.lineTo(x, h - PAD_B);
+                    outputCtx.stroke();
+                    const label = d.toLocaleDateString('en-US', { month: 'short' });
+                    outputCtx.textAlign = x > w - 30 ? 'right' : 'left';
+                    outputCtx.fillText(label, x > w - 30 ? x - 2 : x + 2, h - 6);
+                    outputCtx.textAlign = 'left';
+                }
+            }
+
+            // Q10-Q90 (outer, light gray)
+            outputCtx.fillStyle = 'rgba(0, 0, 0, 0.09)';
+            outputCtx.beginPath();
+            for (let t = 0; t < hZ; t++) outputCtx.lineTo(xAt(t), yAt(q(t, 0)));
+            for (let t = hZ - 1; t >= 0; t--) outputCtx.lineTo(xAt(t), yAt(q(t, nq - 1)));
+            outputCtx.closePath();
+            outputCtx.fill();
+
+            // Q25-Q75 (inner) -- overlaps the outer fill, reading visibly
+            // darker in the middle without needing a higher raw alpha.
+            if (nq >= 5) {
+                outputCtx.fillStyle = 'rgba(0, 0, 0, 0.09)';
+                outputCtx.beginPath();
+                for (let t = 0; t < hZ; t++) outputCtx.lineTo(xAt(t), yAt(q(t, 1)));
+                for (let t = hZ - 1; t >= 0; t--) outputCtx.lineTo(xAt(t), yAt(q(t, nq - 2)));
+                outputCtx.closePath();
+                outputCtx.fill();
+            }
+
+            // forecast median (solid mid-gray, 2px)
+            const mid = Math.floor(nq / 2);
+            outputCtx.strokeStyle = '#555';
+            outputCtx.lineWidth = 2;
+            outputCtx.beginPath();
+            for (let t = 0; t < hZ; t++) {
+                const x = xAt(t), y = yAt(q(t, mid));
+                if (t === 0) outputCtx.moveTo(x, y); else outputCtx.lineTo(x, y);
+            }
+            outputCtx.stroke();
+
+            // actual continuation: dotted black, drawn last so it reads on
+            // top of the bands/median. Last horizon day (1989-01-01 when
+            // origin is at its latest, Nov 30) has no ground truth -- the
+            // series ends 1988-12-31.
+            outputCtx.strokeStyle = '#1a1a1a';
+            outputCtx.lineWidth = 2;
+            outputCtx.setLineDash([0.1, 6]);
+            outputCtx.lineCap = 'round';
+            outputCtx.beginPath();
+            let started = false;
+            for (let t = 0; t < hZ; t++) {
+                if (ORIGIN + t >= series.length) break;
+                const x = xAt(t), y = yAt(series[ORIGIN + t]);
+                if (!started) { outputCtx.moveTo(x, y); started = true; } else outputCtx.lineTo(x, y);
+            }
+            outputCtx.stroke();
+            outputCtx.setLineDash([]);
+            outputCtx.lineCap = 'butt';
+        }
+
+        function drawAll() {
+            drawInputChart();
+            drawOutputChart();
+        }
+
+        // ---- metrics: inside band, CRPS (2x mean pinball over the 5
+        // trained quantile levels), and MAE ratio vs a weekly-naive
+        // baseline (repeats the value from 7 days earlier) -- all computed
+        // against the real continuation only (days with no ground truth,
+        // e.g. the horizon's last day when origin is at its latest, are
+        // excluded from every one of these). ----
+        function updateMetrics() {
+            if (!lastForecast || lastForecast.origin !== ORIGIN) {
+                metricInside.textContent = '—';
+                metricCrps.textContent = '—';
+                metricNaive.textContent = '—';
+                metricMs.textContent = '—';
+                return;
+            }
+            const { quantiles, horizon: hZ, nQuantiles: nq, ms } = lastForecast;
+            const mid = Math.floor(nq / 2);
+            let inside = 0, pinballSum = 0, pinballCount = 0;
+            let saeMedian = 0, saeNaive = 0, n = 0;
+            for (let t = 0; t < hZ; t++) {
+                if (ORIGIN + t >= series.length) continue;
+                const actual = series[ORIGIN + t];
+                const q0 = quantiles[t * nq + 0], qLast = quantiles[t * nq + nq - 1];
+                if (actual >= q0 && actual <= qLast) inside += 1;
+                for (let qi = 0; qi < nq; qi++) {
+                    const pred = quantiles[t * nq + qi];
+                    const lvl = QLEVELS[qi] ?? qi / (nq - 1);
+                    const err = actual - pred;
+                    pinballSum += err >= 0 ? err * lvl : -err * (1 - lvl);
+                    pinballCount += 1;
+                }
+                const pred = quantiles[t * nq + mid];
+                saeMedian += Math.abs(actual - pred);
+                saeNaive += Math.abs(actual - series[ORIGIN + t - 7]);
+                n += 1;
+            }
+            const crps = 2 * (pinballSum / pinballCount);
+            const naiveRatio = (saeMedian / n) / (saeNaive / n);
+            metricInside.textContent = `${inside}/${hZ}`;
+            metricCrps.textContent = crps.toFixed(0);
+            metricNaive.textContent = naiveRatio.toFixed(2);
+            metricMs.textContent = ms.toFixed(1);
+        }
+
+        function runForecast() {
+            if (forecasting || !window.__app.ready) return;
+            forecasting = true;
+            forecastBtn.disabled = true;
+            setStatus('forecasting…');
+            requestIdCounter += 1;
+            worker.postMessage({ type: 'forecast', origin: ORIGIN, requestId: requestIdCounter });
+        }
+        forecastBtn.addEventListener('click', runForecast);
+
+        function scheduleForecast() {
+            if (debounceTimer) clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(runForecast, 150);
+        }
+
+        function commitOrigin(o) {
+            ORIGIN = clampOrigin(o);
+            markerOrigin = ORIGIN;
+            lastForecast = null;
+            drawAll();
+            updateMetrics();
+            if (window.__app.ready) scheduleForecast();
+        }
+
+        function previewMarker(o) {
+            markerOrigin = clampOrigin(o);
+            drawInputChart(); // cheap: only the marker line moves, OUTPUT is unchanged until release
+        }
+
+        // ---- origin bar: drag directly on the INPUT chart; release
+        // commits (forecasts). The drawn window itself never moves.
+        function originFromInputEvent(e) {
+            const rect = inputCanvas.getBoundingClientRect();
+            const { start, end } = INPUT_WINDOW;
+            const frac = Math.min(1, Math.max(0, (e.clientX - rect.left - PAD_L) / (rect.width - PAD_L - PAD_R)));
+            return start + frac * (end - start);
+        }
+        let dragging = false;
+        inputCanvas.addEventListener('pointerdown', (e) => {
+            if (!window.__app.ready) return;
+            dragging = true;
+            inputCanvas.setPointerCapture(e.pointerId);
+            previewMarker(originFromInputEvent(e));
+        });
+        inputCanvas.addEventListener('pointermove', (e) => {
+            if (!dragging) return;
+            previewMarker(originFromInputEvent(e));
+        });
+        inputCanvas.addEventListener('pointerup', () => {
+            if (!dragging) return;
+            dragging = false;
+            commitOrigin(markerOrigin);
+        });
+
+        // ---- series picker: prepared for more entries later, currently
+        // just the one active series (web/data/index.json). ----
+        async function loadSeriesIndex() {
+            try {
+                const list = await fetch('./data/index.json').then((r) => r.json());
+                seriesGrid.innerHTML = '';
+                for (const entry of list) {
+                    const btn = document.createElement('button');
+                    btn.className = 'series-btn active';
+                    btn.type = 'button';
+                    btn.textContent = entry.name;
+                    seriesGrid.appendChild(btn);
+                }
+            } catch (err) {
+                console.warn('[t0] could not load series index:', err);
+            }
+        }
+        loadSeriesIndex();
+
+        worker.onmessage = (e) => {
+            const msg = e.data;
+            switch (msg.type) {
+                case 'status':
+                    setDot('loading');
+                    setStatus(msg.text);
+                    break;
+                case 'ready': {
+                    series = msg.series;
+                    horizon = msg.horizon;
+                    nQuantiles = msg.nQuantiles;
+                    seriesStartDate = msg.startDate;
+                    INPUT_WINDOW = { start: dateToIndex('1988-07-01'), end: dateToIndex('1988-11-30') };
+                    ORIGIN = clampOrigin(dateToIndex('1988-11-30'));
+                    markerOrigin = ORIGIN;
+                    metricsCard.style.display = 'block';
+                    metricSize.textContent = formatBytes(msg.modelBytes);
+                    metricBackend.textContent = msg.backend;
+                    setDot('ready');
+                    setStatus(`model loaded, ${formatBackend(msg.backend)}`);
+                    window.__app.ready = true;
+                    forecastBtn.disabled = false;
+                    drawAll();
+                    runForecast();
+                    break;
+                }
+                case 'forecast': {
+                    if (msg.requestId !== requestIdCounter) break; // stale, a newer request superseded it
+                    forecasting = false;
+                    forecastBtn.disabled = false;
+                    lastForecast = msg;
+                    window.__app.lastForecast = msg;
+                    window.__app.forecastCount += 1;
+                    setDot('ready');
+                    setStatus(`forecast in ${msg.ms.toFixed(0)} ms`);
+                    drawAll();
+                    updateMetrics();
+                    break;
+                }
+                case 'error':
+                    forecasting = false;
+                    forecastBtn.disabled = false;
+                    setDot('error');
+                    setStatus('Error: ' + msg.message);
+                    console.error(msg.message);
+                    break;
+                default:
+                    console.warn('[main] unknown message type:', msg.type);
+            }
+        };
+
+        setDot('loading');
+        setStatus('Loading...');
+        worker.postMessage({ type: 'load' });
+    </script>
+</body>
+</html>
