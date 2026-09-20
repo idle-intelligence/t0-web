@@ -13,8 +13,17 @@ use crate::config::{LayerType, T0Config};
 use crate::data::{MaskType, TimeSeries};
 use crate::mask::{build_group_mask, build_time_mask, patch_attendable, reduce_patch_metadata};
 use crate::ops::{mhsa, quantile_head, residual_block, rmsnorm, swiglu_ffn, RopeTables};
+use crate::quantile::{interpolate_quantiles, prob_mass, weighted_quantile};
 use crate::scaler::CausalScaler;
 use crate::weights::Weights;
+
+/// `T0Forecaster`'s `max_horizon`: the model predicts this many steps in one
+/// forward pass; beyond it, `RolloutManager` (`t0/model/rollout.py`) falls
+/// back to the autoregressive rollout that `forecast_rollout` below ports.
+/// Both t0-alpha and t0-beta train with `max_horizon = 1024` (see
+/// `docs/reports/t0-alpha.md`); this isn't in `T0Config` because neither
+/// published checkpoint varies it.
+pub const MAX_HORIZON: usize = 1024;
 
 struct AttnWeights<B: Backend> {
     norm_scale: Tensor<B, 1>,
@@ -458,8 +467,8 @@ fn forecast_series_prepare<B: Backend>(
     let padded_horizon = horizon.div_ceil(patch_size) * patch_size;
     let padded_t_ctx = t_ctx + pad_left;
     assert!(
-        padded_t_ctx + padded_horizon <= 1024,
-        "beyond max_horizon needs autoregressive rollout (unimplemented)"
+        padded_horizon <= MAX_HORIZON,
+        "single-window forecast_series can't exceed max_horizon ({MAX_HORIZON}) in one pass -- use forecast_rollout"
     );
 
     let window = raw.pad(patch_size, t_ctx);
@@ -534,6 +543,119 @@ fn forecast_series<B: Backend>(
     let (scaled, prepared) = forecast_series_prepare(model, raw, t_ctx, horizon);
     let (predictions, trace) = model.forward(&scaled, device, want_trace);
     forecast_series_finish(model, predictions, trace, &prepared, v, horizon)
+}
+
+/// `RolloutManager.predict`, restricted to a single univariate target series
+/// with no known-future covariates -- the shape every GIFT-Eval entry takes
+/// (`T0Predictor._contexts_from_entries` drops covariates for the same
+/// reason: "the benchmark scores the target channel only", `t0/evaluation/
+/// predictor.py`). That drops `TimeSeries`/mask/group-id bookkeeping
+/// entirely: a "buffer" is just a growing `Vec<f32>` of real-then-synthetic
+/// values, and `time_slice(decoded, context_width+decoded+horizon)` is
+/// "take the trailing `context_width` elements" of that vector.
+///
+/// Feed-back rule (`RolloutManager.update_buffer_with_predictions` +
+/// `expand_prediction_paths`): beyond `max_horizon`, one path per query
+/// quantile level is rolled forward independently, each path feeding back
+/// *its own* column of the previously *reduced* (query-level) prediction --
+/// not its own raw model output -- as if that quantile trajectory were the
+/// observed continuation. Each step's raw per-path, per-trained-quantile
+/// outputs are then mixed back down to the query levels by
+/// `QuantileRolloutReducer.reduce` (`weighted_quantile` over the
+/// trained-level x query-level probability-mass grid) before being fed back
+/// again -- so per-path divergence within one AR block is real (each path
+/// samples its own belief), but is re-collapsed to a single distribution at
+/// every block boundary.
+///
+/// Context re-windowing to `context_length` (e.g. 8192): every AR step's
+/// window is the trailing `context_width = round_up(context_length,
+/// patch_size)` elements of the (real + fed-back) buffer -- oldest
+/// already-decoded steps fall off the left as new ones are appended on the
+/// right, so the model always attends over the same-sized window, never a
+/// growing one (`docs/runs/2026-09-19-gifteval-subset.md`'s 512-context cap
+/// is the special case where the whole series fits and nothing ever falls
+/// off).
+///
+/// `query_quantile_levels` must be sorted ascending and strictly inside
+/// `(0, 1)` -- extrapolation past the model's trained quantile range
+/// (`extrapolate_quantiles` in `t0/quantile.py`) isn't implemented; GIFT-Eval's
+/// query levels (deciles) are always inside t0-alpha/t0-beta's trained range.
+pub fn forecast_rollout<B: Backend>(
+    model: &T0Model<B>,
+    context: &[f32],
+    t_ctx: usize,
+    prediction_length: usize,
+    query_quantile_levels: &[f32],
+    device: &B::Device,
+) -> Vec<f32> {
+    let patch_size = model.config.patch_size;
+    let trained = &model.config.quantile_levels;
+    let n_trained = trained.len();
+    let trained_mass = prob_mass(trained);
+    let n_query = query_quantile_levels.len();
+    let query_mass = prob_mass(query_quantile_levels);
+    let round_up = |x: usize, m: usize| x.div_ceil(m) * m;
+    let context_width = round_up(t_ctx, patch_size);
+
+    let horizon0 = round_up(prediction_length, patch_size).min(MAX_HORIZON);
+    let (block0, _) = forecast(model, context, 1, t_ctx, horizon0, device, false);
+    let mut first: Vec<f32> = Vec::with_capacity(horizon0 * n_query);
+    for h in 0..horizon0 {
+        first.extend(interpolate_quantiles(query_quantile_levels, trained, &block0[h * n_trained..(h + 1) * n_trained]));
+    }
+    if prediction_length <= horizon0 {
+        first.truncate(prediction_length * n_query);
+        return first;
+    }
+
+    let n_paths = n_query;
+    let mut paths_context: Vec<Vec<f32>> = vec![context.to_vec(); n_paths];
+    let mut remaining = prediction_length - horizon0;
+    let mut prev_block = first.clone();
+    let mut prev_width = horizon0;
+    let mut out_chunks: Vec<Vec<f32>> = vec![first];
+
+    while remaining > 0 {
+        for (j, buf) in paths_context.iter_mut().enumerate() {
+            for h in 0..prev_width {
+                buf.push(prev_block[h * n_query + j]);
+            }
+        }
+        let horizon = round_up(remaining, patch_size).min(MAX_HORIZON);
+        let mut batch_ctx = vec![0.0f32; n_paths * context_width];
+        for (j, buf) in paths_context.iter().enumerate() {
+            let start = buf.len() - context_width.min(buf.len());
+            let window = &buf[start..];
+            let dst = &mut batch_ctx[j * context_width..(j + 1) * context_width];
+            dst[context_width - window.len()..].copy_from_slice(window);
+        }
+        let blocks = forecast_batch(model, &batch_ctx, n_paths, context_width, horizon, device); // [n_paths, horizon, n_trained]
+
+        let mut reduced = Vec::with_capacity(horizon * n_query);
+        let mut samples = vec![0.0f32; n_paths * n_trained];
+        let mut weights = vec![0.0f32; n_paths * n_trained];
+        for j in 0..n_paths {
+            for pq in 0..n_trained {
+                weights[j * n_trained + pq] = trained_mass[pq] * query_mass[j];
+            }
+        }
+        for h in 0..horizon {
+            for j in 0..n_paths {
+                for pq in 0..n_trained {
+                    samples[j * n_trained + pq] = blocks[j * horizon * n_trained + h * n_trained + pq];
+                }
+            }
+            reduced.extend(weighted_quantile(query_quantile_levels, &weights, &samples));
+        }
+
+        prev_width = horizon;
+        prev_block = reduced.clone();
+        out_chunks.push(reduced);
+        remaining -= horizon;
+    }
+    let mut out: Vec<f32> = out_chunks.concat();
+    out.truncate(prediction_length * n_query);
+    out
 }
 
 /// Same as `forecast_series`, but via `T0Model::forward_async`.
