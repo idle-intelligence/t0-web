@@ -137,16 +137,36 @@ async function cachedFetch(url, label) {
     return buf.buffer;
 }
 
-// Backend selection: WebGPU if this worker's `navigator.gpu` exists
-// (dedicated workers get their own WorkerNavigator with the same `gpu`
-// property as the window), else the CPU (burn-ndarray) build. Two
+// Backend selection: WebGPU if this worker's `navigator.gpu` exists AND an
+// adapter can actually be obtained (dedicated workers get their own
+// WorkerNavigator with the same `gpu` property as the window) -- some
+// browsers/flags expose `navigator.gpu` but fail requestAdapter(), and
+// t0-wasm's wgpu build has no graceful fallback for that (it traps), so
+// the check has to be the real thing, not just feature detection. Two
 // separate wasm-pack outputs -- `pkg-wgpu/` (built with
 // `--no-default-features --features wgpu`) and `pkg/` (default,
 // `ndarray`) -- since the backend is a compile-time Cargo feature, same
 // convention as `crates/cli`.
-const HAS_WEBGPU = typeof navigator !== 'undefined' && !!navigator.gpu;
-const BACKEND = HAS_WEBGPU ? 'webgpu' : 'wasm/ndarray';
-const PKG_DIR = HAS_WEBGPU ? './pkg-wgpu' : './pkg';
+let BACKEND = null;
+let PKG_DIR = null;
+
+async function detectBackend() {
+    if (BACKEND) return;
+    if (typeof navigator !== 'undefined' && navigator.gpu) {
+        try {
+            const adapter = await navigator.gpu.requestAdapter();
+            if (adapter) {
+                BACKEND = 'webgpu';
+                PKG_DIR = './pkg-wgpu';
+                return;
+            }
+        } catch (err) {
+            // fall through to CPU
+        }
+    }
+    BACKEND = 'wasm/ndarray';
+    PKG_DIR = './pkg';
+}
 
 async function handleLoad(modelKey) {
     const key = MODELS[modelKey] ? modelKey : DEFAULT_MODEL_KEY;
@@ -164,6 +184,8 @@ async function handleLoad(modelKey) {
         model.free();
         model = null;
     }
+
+    await detectBackend();
 
     if (!t0wasm) {
         self.postMessage({ type: 'status', text: `Loading WASM module (${BACKEND})...` });
