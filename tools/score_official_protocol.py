@@ -17,6 +17,7 @@ Usage:
 """
 
 import argparse
+import csv
 import json
 import os
 import struct
@@ -115,34 +116,118 @@ def score_task(task, forecasts_9q):
     return float(res["MASE[0.5]"].iloc[0]), float(res["mean_weighted_sum_quantile_loss"].iloc[0])
 
 
+def load_results_csv(path):
+    """Read a gift-eval-style `all_results.csv` (our own, or theirs, e.g.
+    `results/seasonal_naive/all_results.csv` from the gift-eval repo) and
+    return {config: (mase, crps)} keyed by the `dataset` column verbatim
+    (e.g. "loop_seattle/5T/short") -- this is also the GIFT-Eval leaderboard's
+    join key, see `--normalize-by`'s docstring below."""
+    out = {}
+    with open(path) as f:
+        for r in csv.DictReader(f):
+            out[r["dataset"]] = (
+                float(r["eval_metrics/MASE[0.5]"]),
+                float(r["eval_metrics/mean_weighted_sum_quantile_loss"]),
+            )
+    return out
+
+
+def geo_mean(values):
+    a = np.asarray(values, dtype=np.float64)
+    return float(np.exp(np.mean(np.log(a))))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--variant", required=True, help="label only, used in the printed summary line")
-    ap.add_argument("--manifest-dir", required=True)
-    ap.add_argument("--forecast-dir", required=True)
+    ap.add_argument("--manifest-dir", help="forecast-recomputation mode: mutually exclusive with --results-csv")
+    ap.add_argument("--forecast-dir", help="forecast-recomputation mode: mutually exclusive with --results-csv")
+    ap.add_argument(
+        "--results-csv",
+        help="score an already-computed gift-eval-style all_results.csv directly "
+        "(dataset, eval_metrics/MASE[0.5], eval_metrics/mean_weighted_sum_quantile_loss "
+        "columns) instead of recomputing forecasts from --manifest-dir/--forecast-dir",
+    )
+    ap.add_argument(
+        "--normalize-by",
+        help="path to a seasonal-naive all_results.csv (e.g. gift-eval's "
+        "results/seasonal_naive/all_results.csv) to additionally print the "
+        "GIFT-Eval-leaderboard-comparable normalised aggregate: per config, "
+        "divide this run's MASE/CRPS by the seasonal-naive baseline's MASE/CRPS "
+        "on that same config (joined on the `dataset` column, e.g. "
+        "\"loop_seattle/5T/short\"), then take the geometric mean "
+        "(prod(x)**(1/n)) over configs. This is the exact normalization the "
+        "GIFT-Eval leaderboard notebook applies before its geometric mean -- see "
+        "SalesforceAIResearch/gift-eval notebooks/zeus.ipynb (commit "
+        "9a014e9e8ea130ba39c100c60d5dcbab7db57ac9), the 'Print Results' cell: "
+        "`df['normalized MASE'] = df['eval_metrics/MASE[0.5]'] / seasonal_naive_mase[idx]` "
+        "(same for CRPS), then `geo_mean(df['normalized MASE'])` with "
+        "`geo_mean = lambda a: np.array(a).prod()**(1.0/len(a))` -- algebraically "
+        "identical to this script's own `exp(mean(log(x)))` raw aggregate, just "
+        "applied to the normalised ratios instead of the raw values. Every one "
+        "of the 97 GIFT-Eval configs must have a matching row in both CSVs, or "
+        "this exits with an error listing the unmatched keys.",
+    )
     args = ap.parse_args()
 
-    with open(os.path.join(args.manifest_dir, "manifest.json")) as f:
-        manifest = json.load(f)
+    if args.results_csv:
+        results = load_results_csv(args.results_csv)
+        rows = [(config, None, mase, crps) for config, (mase, crps) in results.items()]
+    else:
+        if not (args.manifest_dir and args.forecast_dir):
+            ap.error("either --results-csv, or both --manifest-dir and --forecast-dir, are required")
+        with open(os.path.join(args.manifest_dir, "manifest.json")) as f:
+            manifest = json.load(f)
 
-    rows = []
-    for task in manifest["tasks"]:
-        safe = task["config"].replace("/", "_")
-        path = os.path.join(args.forecast_dir, f"{safe}.f32")
-        n = task["n_windows"] * task["horizon"] * len(TRAINED_LEVELS)
-        flat = read_f32(path, n).reshape(task["n_windows"], task["horizon"], len(TRAINED_LEVELS))
-        flat2 = flat.reshape(-1, len(TRAINED_LEVELS))
-        interp = interpolate_quantiles(QUERY_LEVELS, TRAINED_LEVELS, flat2)
-        preds = interp.reshape(task["n_windows"], task["horizon"], len(QUERY_LEVELS))
-        mase, crps = score_task(task, preds)
-        print(f"{task['config']}: n={task['n_windows']} MASE={mase:.4f} CRPS={crps:.4f}")
-        rows.append((task["config"], task["n_windows"], mase, crps))
+        rows = []
+        for task in manifest["tasks"]:
+            safe = task["config"].replace("/", "_")
+            path = os.path.join(args.forecast_dir, f"{safe}.f32")
+            n = task["n_windows"] * task["horizon"] * len(TRAINED_LEVELS)
+            flat = read_f32(path, n).reshape(task["n_windows"], task["horizon"], len(TRAINED_LEVELS))
+            flat2 = flat.reshape(-1, len(TRAINED_LEVELS))
+            interp = interpolate_quantiles(QUERY_LEVELS, TRAINED_LEVELS, flat2)
+            preds = interp.reshape(task["n_windows"], task["horizon"], len(QUERY_LEVELS))
+            mase, crps = score_task(task, preds)
+            print(f"{task['config']}: n={task['n_windows']} MASE={mase:.4f} CRPS={crps:.4f}")
+            rows.append((task["config"], task["n_windows"], mase, crps))
 
     mases = np.array([r[2] for r in rows])
     crpses = np.array([r[3] for r in rows])
-    agg_mase = float(np.exp(np.mean(np.log(mases))))
-    agg_crps = float(np.exp(np.mean(np.log(crpses))))
-    print(f"\n{args.variant} aggregate (geometric mean over {len(rows)} tasks): MASE={agg_mase:.4f} CRPS={agg_crps:.4f}")
+    agg_mase = geo_mean(mases)
+    agg_crps = geo_mean(crpses)
+    print(
+        f"\n{args.variant} raw aggregate (geometric mean over {len(rows)} configs, "
+        f"NOT normalized by seasonal-naive, not comparable to the GIFT-Eval "
+        f"leaderboard/model-card numbers): MASE={agg_mase:.4f} CRPS={agg_crps:.4f}"
+    )
+
+    if args.normalize_by:
+        naive = load_results_csv(args.normalize_by)
+        unmatched = [config for config, *_ in rows if config not in naive]
+        if unmatched:
+            print(f"\nERROR: {len(unmatched)} config(s) missing from --normalize-by baseline:")
+            for config in unmatched:
+                print(f"  {config}")
+            raise SystemExit(1)
+
+        norm_mases = []
+        norm_crpses = []
+        print(f"\n{args.variant} per-config normalised (this run's MASE/CRPS / seasonal-naive's):")
+        for config, _n, mase, crps in rows:
+            naive_mase, naive_crps = naive[config]
+            nm, nc = mase / naive_mase, crps / naive_crps
+            norm_mases.append(nm)
+            norm_crpses.append(nc)
+            print(f"{config}: normalized_MASE={nm:.4f} normalized_CRPS={nc:.4f}")
+
+        agg_norm_mase = geo_mean(norm_mases)
+        agg_norm_crps = geo_mean(norm_crpses)
+        print(
+            f"\n{args.variant} normalised aggregate (geometric mean over {len(rows)} configs, "
+            f"comparable to the GIFT-Eval leaderboard / model-card numbers): "
+            f"MASE={agg_norm_mase:.4f} CRPS={agg_norm_crps:.4f}"
+        )
 
 
 if __name__ == "__main__":
