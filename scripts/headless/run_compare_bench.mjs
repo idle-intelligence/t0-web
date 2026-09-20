@@ -66,8 +66,15 @@ for (const key of ['oursVsF32', 'theirsVsF32', 'theirsVsOurs']) {
 }
 const theirsVsOursPct = result.agreement.theirsVsOurs.overall.maxAbsPct;
 if (Number.isFinite(theirsVsOursPct) && theirsVsOursPct >= 1.0) problems.push(`agreement theirsVsOurs max-abs ${theirsVsOursPct.toFixed(3)}% of range >= 1%`);
+// Relative gate, not absolute: max-abs / (max-min of the compared
+// quantile-grid values) <= 1e-5. An absolute 1e-4 gate was calibrated
+// against a small-magnitude synthetic fixture and falsely failed on
+// real-world thousands-magnitude data (0.001953125 absolute there is
+// ~1e-6 relative) -- see docs/runs/2026-09-20-compare-page.md.
 if (result.rowParityMaxAbs == null || !Number.isFinite(result.rowParityMaxAbs)) problems.push(`forecastBatchRows parity max-abs not finite: ${result.rowParityMaxAbs}`);
-else if (result.rowParityMaxAbs > 1e-4) problems.push(`forecastBatchRows parity max-abs ${result.rowParityMaxAbs} > 1e-4`);
+else if (result.rowParityRelative == null || !Number.isFinite(result.rowParityRelative)) problems.push(`forecastBatchRows parity relative not finite: ${result.rowParityRelative}`);
+else if (result.rowParityRelative > 1e-5)
+  problems.push(`forecastBatchRows parity max-abs ${result.rowParityMaxAbs} / range ${result.rowParityRange} = ${result.rowParityRelative} > 1e-5`);
 
 if (problems.length) {
   console.error('GATE FAILED:\n' + problems.map((p) => '- ' + p).join('\n'));
@@ -80,7 +87,11 @@ console.log(
   result.agreement.oursVsF32.overall.maxAbs.toExponential(3),
   ', forecastBatchRows parity max-abs',
   result.rowParityMaxAbs.toExponential(3),
-  '< 1e-4',
+  '/ range',
+  result.rowParityRange,
+  '=',
+  result.rowParityRelative.toExponential(3),
+  '<= 1e-5',
 );
 
 await browser.close();

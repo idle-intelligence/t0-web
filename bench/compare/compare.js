@@ -468,6 +468,8 @@ async function run(overrideConfig) {
             batchRows.push({ engine: 'theirs (ONNX)', error: e.message || String(e) });
         }
         let rowParityMaxAbs = null;
+        let rowParityRange = null;
+        let rowParityRelative = null;
         try {
             const concatRows = new Float32Array(N_BATCH * cfg.context);
             for (let r = 0; r < N_BATCH; r++) concatRows.set(rows[r], r * cfg.context);
@@ -478,19 +480,34 @@ async function run(overrideConfig) {
             batchRows.push({ engine: 'ours (t0-fast)', msTotal: ms, msPerSignal: ms / N_BATCH, note: batchNote });
 
             // Headless parity gate: every row of forecastBatchRows must
-            // equal that row's own single-signal forecast() within 1e-4.
+            // equal that row's own single-signal forecast() to within a
+            // *relative* tolerance -- max-abs diff / (max-min) of this
+            // window's own full quantile-grid range, not an absolute
+            // epsilon. An absolute 1e-4 gate was previously calibrated
+            // against a small-magnitude synthetic fixture (values in
+            // [-1, 1]) and falsely failed real-world thousands-magnitude
+            // data (see docs/runs/2026-09-20-compare-page.md): the same
+            // 0.001953125 absolute diff is ~1e-6 relative there.
             setStatus('generating', 'batch-rows parity check...');
             const perRow = cfg.horizon * NQ;
             let maxAbs = 0;
+            let rpLo = Infinity, rpHi = -Infinity;
             for (let r = 0; r < N_BATCH; r++) {
                 const single = await ours.model.forecast(rows[r], cfg.horizon);
                 for (let i = 0; i < perRow; i++) {
-                    maxAbs = Math.max(maxAbs, Math.abs(batchOut[r * perRow + i] - single[i]));
+                    const bo = batchOut[r * perRow + i];
+                    maxAbs = Math.max(maxAbs, Math.abs(bo - single[i]));
+                    rpLo = Math.min(rpLo, bo, single[i]);
+                    rpHi = Math.max(rpHi, bo, single[i]);
                 }
             }
+            rowParityRange = rpHi - rpLo || 1;
+            rowParityRelative = maxAbs / rowParityRange;
             rowParityMaxAbs = maxAbs;
-            if (maxAbs > 1e-4) {
-                throw new Error(`forecastBatchRows parity gate failed: max-abs diff ${maxAbs} > 1e-4 across ${N_BATCH} rows`);
+            if (rowParityRelative > 1e-5) {
+                throw new Error(
+                    `forecastBatchRows parity gate failed: max-abs diff ${maxAbs} / range ${rowParityRange} = ${rowParityRelative} > 1e-5 across ${N_BATCH} rows`
+                );
             }
         } catch (e) {
             batchRows.push({ engine: 'ours (t0-fast)', error: e.message || String(e) });
@@ -535,7 +552,7 @@ async function run(overrideConfig) {
 
         setStatus('ready', `done: context=${cfg.context} horizon=${cfg.horizon} quant=${cfg.quant}`);
 
-        const result = { config: cfg, latencyRows, batchRows, agreement, rowParityMaxAbs, gpuInfo, ua: navigator.userAgent, timestamp: new Date().toISOString() };
+        const result = { config: cfg, latencyRows, batchRows, agreement, rowParityMaxAbs, rowParityRange, rowParityRelative, gpuInfo, ua: navigator.userAgent, timestamp: new Date().toISOString() };
         state.lastResult = result;
         return result;
     } catch (e) {
