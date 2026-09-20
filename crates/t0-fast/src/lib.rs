@@ -10,6 +10,7 @@
 
 pub mod engine;
 pub mod model;
+pub mod pool;
 mod rope_tables;
 
 use anyhow::Result;

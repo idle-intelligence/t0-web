@@ -4,7 +4,9 @@
 // of the three 512-wide q/k/v segments), applies the additive mask,
 // softmax, and writes the concatenated-heads output ([outer*seq, embed]).
 const HEAD_DIM: u32 = 64u;
-const MAX_SEQ: u32 = 64u;
+// Model max is 32 (max_horizon=1024 / patch_size=32); 128 leaves headroom
+// for group-attention's seq=variate-chunk-count on a batched forecast too.
+const MAX_SEQ: u32 = 128u;
 
 struct Dims { outer: u32, seq: u32, heads: u32, embed: u32, qkv_stride: u32, mask_outer_stride: u32, scale: f32, _pad0: u32 };
 
@@ -13,7 +15,7 @@ struct Dims { outer: u32, seq: u32, heads: u32, embed: u32, qkv_stride: u32, mas
 @group(0) @binding(2) var<storage, read_write> out: array<f32>;
 @group(0) @binding(3) var<uniform> dims: Dims;
 
-@compute @workgroup_size(64)
+@compute @workgroup_size(128)
 fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) lid: vec3<u32>) {
     let owh = wg.x;
     let outer = owh / dims.heads;

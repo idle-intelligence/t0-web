@@ -7,9 +7,12 @@
 use std::borrow::Cow;
 use wgpu::util::DeviceExt;
 
+use crate::pool::Pool;
+
 pub struct Engine {
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
+    pub pool: Pool,
     pub linear: wgpu::ComputePipeline,
     pub add_inplace: wgpu::ComputePipeline,
     pub gather_add: wgpu::ComputePipeline,
@@ -60,6 +63,7 @@ impl Engine {
             .map_err(|e| anyhow::anyhow!("no wgpu device: {e}"))?;
 
         Ok(Engine {
+            pool: Pool::new(device.clone(), queue.clone()),
             linear: make_pipeline(&device, "linear", include_str!("shaders/linear.wgsl")),
             add_inplace: make_pipeline(&device, "add_inplace", include_str!("shaders/add_inplace.wgsl")),
             gather_add: make_pipeline(&device, "gather_add", include_str!("shaders/gather_add.wgsl")),

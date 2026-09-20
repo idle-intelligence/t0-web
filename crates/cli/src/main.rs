@@ -409,6 +409,10 @@ fn cmd_bench_fast(weights_path: &Path, config_path: Option<&Path>, n_signals: us
     for _ in 0..warmup {
         let _ = t0_fast::forecast(&engine, &model, &context, n_signals, t_ctx, horizon)?;
     }
+    engine.pool.reset_alloc_count();
+    let _ = t0_fast::forecast(&engine, &model, &context, n_signals, t_ctx, horizon)?;
+    let warm_alloc_count = engine.pool.alloc_count();
+
     let mut times = Vec::with_capacity(reps);
     for _ in 0..reps {
         let t0 = Instant::now();
@@ -418,7 +422,7 @@ fn cmd_bench_fast(weights_path: &Path, config_path: Option<&Path>, n_signals: us
     let med = median(times.clone());
     println!(
         "backend=fast weights={} file_bytes={file_size} load_s={:.3} n_signals={n_signals} t_ctx={t_ctx} horizon={horizon} \
-         reps={reps} median_s={med:.4} per_signal_ms={:.4} all_s={times:?}",
+         reps={reps} median_s={med:.4} per_signal_ms={:.4} warm_alloc_count={warm_alloc_count} all_s={times:?}",
         weights_path.display(),
         load_time.as_secs_f64(),
         (med * 1000.0) / n_signals as f64,
