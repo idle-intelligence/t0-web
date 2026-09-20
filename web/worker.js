@@ -6,17 +6,56 @@
  *
  * Protocol:
  *   Main -> Worker:
- *     { type: 'load' }                                    -- fetch WASM + model + series, init
+ *     { type: 'load', modelKey } -- unload any previous model, fetch WASM
+ *                                    (once) + the chosen model + config +
+ *                                    series (once), init
  *     { type: 'forecast', origin: number, requestId: number } -- forecast from this split point
  *
  *   Worker -> Main:
+ *     { type: 'models', list: {key, label}[], defaultKey } -- sent once at startup
  *     { type: 'status', text: string, key?: string }  -- key present => update that one log line in place
- *     { type: 'ready', series, seriesName, startDate, freq, modelBytes, loadMs, nQuantiles, contextCap, horizon, backend }
+ *     { type: 'ready', modelKey, series, seriesName, startDate, freq, modelBytes, loadMs, nQuantiles, quantileLevels, contextCap, horizon, backend }
  *     { type: 'forecast', origin, originDate, requestId, quantiles, nQuantiles, horizon, ms }
  *     { type: 'error', message: string }
  */
 
-const MODEL_URL = new URL('./models/t0-alpha-q8_0.gguf', import.meta.url).href;
+// Set to e.g. './models' to load `<LOCAL_MODELS_DIR>/<key>/<file>` and
+// `<LOCAL_MODELS_DIR>/<key>/config.json` instead of Hugging Face -- lets the
+// four weights be tested before their HF repos exist. Empty by default.
+const LOCAL_MODELS_DIR = '';
+
+// The four released weights. Each Hugging Face repo holds one GGUF plus its
+// config.json (the source of that model's quantile levels).
+const MODELS = {
+    'alpha-q8': { label: 'alpha Q8_0 (109 MB)', hfRepo: 'idle-intelligence/t0-alpha-q8_0-webgpu', file: 't0-alpha-q8_0.gguf' },
+    'alpha-q4': { label: 'alpha Q4_0 (59 MB)', hfRepo: 'idle-intelligence/t0-alpha-q4_0-webgpu', file: 't0-alpha-q4_0.gguf' },
+    'beta-q8': { label: 'beta Q8_0 (275 MB)', hfRepo: 'idle-intelligence/t0-beta-q8_0-webgpu', file: 't0-beta-q8_0.gguf' },
+    'beta-q4': { label: 'beta Q4_0 (149 MB)', hfRepo: 'idle-intelligence/t0-beta-q4_0-webgpu', file: 't0-beta-q4_0.gguf' },
+};
+const DEFAULT_MODEL_KEY = 'alpha-q4';
+
+// Single source of truth for the model row: the main thread renders its
+// buttons from this list rather than keeping its own copy.
+self.postMessage({
+    type: 'models',
+    list: Object.entries(MODELS).map(([key, m]) => ({ key, label: m.label })),
+    defaultKey: DEFAULT_MODEL_KEY,
+});
+
+function modelUrls(key) {
+    const m = MODELS[key];
+    if (LOCAL_MODELS_DIR) {
+        return {
+            gguf: new URL(`${LOCAL_MODELS_DIR}/${key}/${m.file}`, import.meta.url).href,
+            config: new URL(`${LOCAL_MODELS_DIR}/${key}/config.json`, import.meta.url).href,
+        };
+    }
+    return {
+        gguf: `https://huggingface.co/${m.hfRepo}/resolve/main/${m.file}`,
+        config: `https://huggingface.co/${m.hfRepo}/resolve/main/config.json`,
+    };
+}
+
 const SERIES_URL = new URL('./data/series.f32', import.meta.url).href;
 const SERIES_META_URL = new URL('./data/series_meta.json', import.meta.url).href;
 const CACHE_NAME = 't0-model-v1';
@@ -46,7 +85,7 @@ self.onmessage = async (e) => {
     const { type, ...data } = e.data;
     try {
         if (type === 'load') {
-            await handleLoad();
+            await handleLoad(data.modelKey);
         } else if (type === 'forecast') {
             await handleForecast(data.origin, data.requestId);
         } else {
@@ -108,19 +147,30 @@ const HAS_WEBGPU = typeof navigator !== 'undefined' && !!navigator.gpu;
 const BACKEND = HAS_WEBGPU ? 'webgpu' : 'wasm/ndarray';
 const PKG_DIR = HAS_WEBGPU ? './pkg-wgpu' : './pkg';
 
-async function handleLoad() {
-    self.postMessage({ type: 'status', text: `Loading WASM module (${BACKEND})...` });
-    const wasmJsUrl = new URL(`${PKG_DIR}/t0_wasm.js`, import.meta.url).href;
-    t0wasm = await import(wasmJsUrl);
-    await t0wasm.default();
-    // Must run before T0Wasm.load(): on wgpu this drives the async
-    // requestAdapter()/requestDevice() setup that WASM has no blocking
-    // executor for (see t0-wasm's initBackend doc comment); a no-op on
-    // ndarray.
-    await t0wasm.initBackend();
+async function handleLoad(modelKey) {
+    const key = MODELS[modelKey] ? modelKey : DEFAULT_MODEL_KEY;
+    const m = MODELS[key];
 
-    self.postMessage({ type: 'status', key: 'download', text: 'Downloading model (Q8_0, ~109 MB)...' });
-    const modelBuf = await cachedFetch(MODEL_URL, 'Downloading model');
+    if (model) {
+        model.free();
+        model = null;
+    }
+
+    if (!t0wasm) {
+        self.postMessage({ type: 'status', text: `Loading WASM module (${BACKEND})...` });
+        const wasmJsUrl = new URL(`${PKG_DIR}/t0_wasm.js`, import.meta.url).href;
+        t0wasm = await import(wasmJsUrl);
+        await t0wasm.default();
+        // Must run before T0Wasm.load(): on wgpu this drives the async
+        // requestAdapter()/requestDevice() setup that WASM has no blocking
+        // executor for (see t0-wasm's initBackend doc comment); a no-op on
+        // ndarray.
+        await t0wasm.initBackend();
+    }
+
+    const urls = modelUrls(key);
+    self.postMessage({ type: 'status', key: 'download', text: `Downloading ${m.label}...` });
+    const modelBuf = await cachedFetch(urls.gguf, `Downloading ${m.label}`);
 
     self.postMessage({ type: 'status', key: 'load', text: 'Loading model...' });
     const t0 = performance.now();
@@ -128,20 +178,26 @@ async function handleLoad() {
     const loadMs = performance.now() - t0;
     self.postMessage({ type: 'status', key: 'load', text: `Model loaded in ${loadMs.toFixed(0)} ms` });
 
-    self.postMessage({ type: 'status', key: 'series', text: 'Loading series...' });
-    const seriesBuf = await fetch(SERIES_URL).then((r) => r.arrayBuffer());
-    series = new Float32Array(seriesBuf);
-    seriesMeta = await fetch(SERIES_META_URL).then((r) => r.json());
-    self.postMessage({
-        type: 'status',
-        key: 'series',
-        text: `Series: ${seriesMeta.name} (${seriesMeta.n_points} points, ${seriesMeta.start_date.slice(0, 10)} to ${dateAtIndex(seriesMeta.n_points - 1)})`,
-    });
+    const config = await fetch(urls.config).then((r) => r.json());
+    const quantileLevels = config.quantile_levels;
+
+    if (!series) {
+        self.postMessage({ type: 'status', key: 'series', text: 'Loading series...' });
+        const seriesBuf = await fetch(SERIES_URL).then((r) => r.arrayBuffer());
+        series = new Float32Array(seriesBuf);
+        seriesMeta = await fetch(SERIES_META_URL).then((r) => r.json());
+        self.postMessage({
+            type: 'status',
+            key: 'series',
+            text: `Series: ${seriesMeta.name} (${seriesMeta.n_points} points, ${seriesMeta.start_date.slice(0, 10)} to ${dateAtIndex(seriesMeta.n_points - 1)})`,
+        });
+    }
 
     self.postMessage({ type: 'status', key: 'backend', text: `Backend: ${BACKEND}` });
 
     self.postMessage({
         type: 'ready',
+        modelKey: key,
         series: Array.from(series),
         seriesName: seriesMeta.name,
         startDate: seriesMeta.start_date,
@@ -149,6 +205,7 @@ async function handleLoad() {
         modelBytes: modelBuf.byteLength,
         loadMs,
         nQuantiles: model.nQuantiles(),
+        quantileLevels,
         contextCap: CONTEXT_CAP,
         horizon: HORIZON,
         backend: BACKEND,
