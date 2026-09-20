@@ -450,24 +450,31 @@ fn quantizable_f32_bytes(weights: &Weights, config: &T0Config) -> Result<u64> {
     Ok(total)
 }
 
-/// Same data path as `cmd_gifteval` (same manifest, same 512-context-cap
-/// windows, same per-window forecast-and-write loop), driven by
-/// `t0_fast::forecast` instead of a Burn `T0Model`. `weights` is always a
-/// `.gguf` here (GGUF-resident loading, see `t0_fast::load_model_from_gguf`) --
-/// this only fills the *this repo's own* GIFT-Eval-subset table
-/// (`docs/BENCHMARKS.md`'s "GIFT-Eval subset" section, CPU data loading +
-/// GPU forward, 512-step context cap), not the head-to-head table's
-/// "official-protocol subset" row (their code, `CONTEXT_LENGTH=8192`) --
-/// that protocol needs autoregressive rollout past `max_horizon=1024`,
-/// which no backend in this repo implements yet (see
-/// `crates/t0-core/src/model.rs`'s doc comment).
+/// Same data path as `cmd_gifteval` (same manifest, same per-window
+/// forecast-and-write loop), driven by `t0_fast::forecast` instead of a
+/// Burn `T0Model`. `weights_path` picks the load path exactly like
+/// `cmd_parity_fast`: a `.gguf` file loads GGUF-resident (Q8_0/Q4_0,
+/// whatever quant the file was exported at); a `.safetensors` file loads
+/// through `t0_fast::load_model` with `fast_quant` (used for the F32
+/// residency, since `export-gguf` has no F32 quant scheme). Every window
+/// here goes through the single-window `forecast` (no rollout) — valid as
+/// long as every task's horizon fits in one forward pass
+/// (`horizon <= t0_core::MAX_HORIZON`, true for every GIFT-Eval config used
+/// in this repo, capped or official-protocol).
 #[cfg(feature = "fast")]
-fn cmd_gifteval_fast(manifest_dir: &Path, weights_path: &Path, out_dir: &Path) -> Result<()> {
+fn cmd_gifteval_fast(manifest_dir: &Path, weights_path: &Path, config_path: Option<&Path>, out_dir: &Path, fast_quant: &str) -> Result<()> {
     let manifest: GiftManifest = serde_json::from_str(&std::fs::read_to_string(manifest_dir.join("manifest.json"))?)?;
     let engine = t0_fast::Engine::new()?;
+    let is_gguf = weights_path.extension().and_then(|e| e.to_str()) == Some("gguf");
     let t0 = Instant::now();
-    let bytes = std::fs::read(weights_path)?;
-    let model = t0_fast::load_model_from_gguf(&engine, &bytes)?;
+    let model = if is_gguf {
+        let bytes = std::fs::read(weights_path)?;
+        t0_fast::load_model_from_gguf(&engine, &bytes)?
+    } else {
+        let (weights, config) = Weights::load_auto(weights_path, config_path)?;
+        let quant = t0_fast::WeightQuant::parse(fast_quant)?;
+        t0_fast::load_model(&engine, &weights, config, quant)?
+    };
     println!("loaded in {:.3}s", t0.elapsed().as_secs_f64());
     std::fs::create_dir_all(out_dir)?;
     let n_q = model.config.n_quantiles();
@@ -863,7 +870,7 @@ fn main() -> Result<()> {
         "gifteval" => {
             #[cfg(feature = "fast")]
             if backend == "fast" {
-                return cmd_gifteval_fast(&manifest_dir, &weights, &gift_out);
+                return cmd_gifteval_fast(&manifest_dir, &weights, config.as_deref(), &gift_out, &fast_quant);
             }
             cmd_gifteval(&manifest_dir, &weights, config.as_deref(), &gift_out)
         }
