@@ -24,6 +24,10 @@
 // four weights be tested before their HF repos exist. Empty by default.
 const LOCAL_MODELS_DIR = '';
 
+// Version tag on the engine URLs: browsers cache the wasm at a fixed path
+// across rebuilds, even through a hard reload. Bump when the engine changes.
+const ENGINE_BUILD = '2026-09-21';
+
 // The four released weights. Each Hugging Face repo holds one GGUF plus its
 // config.json (the source of that model's quantile levels).
 const MODELS = {
@@ -189,9 +193,9 @@ async function handleLoad(modelKey) {
 
     if (!t0wasm) {
         self.postMessage({ type: 'status', text: `Loading WASM module (${BACKEND})...` });
-        const wasmJsUrl = new URL(`${PKG_DIR}/t0_wasm.js`, import.meta.url).href;
+        const wasmJsUrl = new URL(`${PKG_DIR}/t0_wasm.js?v=${ENGINE_BUILD}`, import.meta.url).href;
         t0wasm = await import(wasmJsUrl);
-        await t0wasm.default();
+        await t0wasm.default(new URL(`${PKG_DIR}/t0_wasm_bg.wasm?v=${ENGINE_BUILD}`, import.meta.url).href);
         // Must run before T0Wasm.load(): on wgpu this drives the async
         // requestAdapter()/requestDevice() setup that WASM has no blocking
         // executor for (see t0-wasm's initBackend doc comment); a no-op on
