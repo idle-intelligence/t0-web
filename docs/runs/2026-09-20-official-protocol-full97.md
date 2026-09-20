@@ -2,7 +2,7 @@
 
 ## Parameters
 
-- Box: RTX 3080 (`gpu-box`, `user@REDACTED_IP`), their code (`gift_eval`/`gluonts`, same
+- Box: a Linux desktop with an RTX 3080, their code (`gift_eval`/`gluonts`, same
   metric path as `tools/score_official_protocol.py` — `MASE()` +
   `MeanWeightedSumQuantileLoss()` via `gluonts.model.evaluate_model`), our
   dequantized Q4_0 weights (`t0-alpha` GGUF, `q4_0`, same export as
@@ -22,7 +22,7 @@
   less than the 2h17m wall time above; the gap is per-config data
   loading/model setup/`gluonts` evaluation overhead not captured in the
   `elapsed_s` field, not a measurement of raw compute alone.
-- Data fetched from the box: `scp -i ~/.ssh/id_gpu_box user@REDACTED_IP:/path/to/repo/t0-web/results/q4_0/{all_results.csv,timing_summary.json} results/full97/q4_0/`
+- Data fetched from the box: `scp gpu-box:/path/to/t0-web/results/q4_0/{all_results.csv,timing_summary.json} results/full97/q4_0/`
   (97 rows in `all_results.csv`, one per config; `results/` is not
   git-ignored in this repo, confirmed with `git check-ignore -v`, so these
   files are committed directly under `results/full97/q4_0/`).

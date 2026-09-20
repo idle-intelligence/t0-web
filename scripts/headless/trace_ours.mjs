@@ -7,6 +7,8 @@
 //
 // Usage: node scripts/headless/trace_ours.mjs --url http://127.0.0.1:8033/ --out-dir /path
 import { chromium } from 'playwright';
+import os from 'node:os';
+import path from 'node:path';
 import fs from 'fs';
 
 function parseArgs(argv) {
@@ -28,7 +30,8 @@ const outDir = args['out-dir'] || '/tmp';
 const pkg = args.pkg || './pkg-wgpu';
 const gguf = args.gguf || './t0-alpha-q8_0.gguf';
 const EXECUTABLE_PATH =
-  '~/Library/Caches/ms-playwright/chromium-1243/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
+  process.env.CHROMIUM_PATH ||
+  path.join(os.homedir(), 'Library/Caches/ms-playwright', 'chromium-1243/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing');
 
 const CATEGORIES = [
   'disabled-by-default-devtools.timeline',

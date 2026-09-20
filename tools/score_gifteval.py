@@ -142,9 +142,11 @@ def score_task(task, forecasts_9q, seasonality):
 def run_reference(manifest):
     from t0 import T0Forecaster
 
-    model = T0Forecaster.from_pretrained(
-        "~/Code/idle-intelligence/models/hf/theforecastingcompany/t0-alpha"
-    ).to("cpu").eval()
+    t0_alpha_dir = os.environ.get(
+        "T0_ALPHA_DIR",
+        os.path.expanduser("~/Code/idle-intelligence/models/hf/theforecastingcompany/t0-alpha"),
+    )
+    model = T0Forecaster.from_pretrained(t0_alpha_dir).to("cpu").eval()
 
     rows = []
     all_forecasts = {}

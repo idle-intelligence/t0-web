@@ -1,6 +1,6 @@
 # t0-web — working rules
 
-Distilled 2026-09-17 from the maintainer's global rules and the idle-intelligence repos (llm-web, stt-web, tts-web, sts-web, trucs.ai). `GOAL.md` is the plan; this file is how we work.
+Distilled 2026-09-17 from the maintainer's global rules and the idle-intelligence repos (llm-web, stt-web, tts-web, sts-web, trucs.ai). This file is how we work.
 
 ## Code
 - Rust. One crate tree, one source, two builds: native (`cli`/`native` feature) and `wasm32-unknown-unknown` (`web` feature). WASM is just another build target, never a port.
@@ -27,7 +27,7 @@ Distilled 2026-09-17 from the maintainer's global rules and the idle-intelligenc
 - The repo's demo page (`web/`) covers the repo's whole scope. It is self-contained: copy it to a static server and it works.
 - Template: STATUS / INPUT / OUTPUT / PERFORMANCE panels. No settings panels, no URL inputs. Swap the engine, keep the template.
 - trucs.ai is a separate thing with its own UX and choices. Not this repo's concern.
-- Verify in Playwright's bundled headless Chromium. Never open or drive the maintainer's browser. Drive the page through a small `window.__app` API, not DOM clicks.
+- Verify in Playwright's bundled headless Chromium. Never open or drive a personal browser. Drive the page through a small `window.__app` API, not DOM clicks.
 
 ## Models, data, HF
 - Weights and datasets are never committed. Fetch at runtime or regenerate.
@@ -35,7 +35,7 @@ Distilled 2026-09-17 from the maintainer's global rules and the idle-intelligenc
 - The HF CLI is `hf` (never `huggingface-cli`). Upload: `hf upload <repo_id> <local_path> <path_in_repo>` — only when told.
 
 ## GPU and measurements
-- One GPU job at a time on the M2 unless the maintainer says otherwise for the night. Never report throughput measured under contention; mark such numbers provisional.
+- One GPU job at a time on the local machine unless the maintainer says otherwise for the night. Never report throughput measured under contention; mark such numbers provisional.
 - Benchmarks and training runs are a research log: machine, commit, exact command, then a data table. Tables are data only; analysis goes in a separate doc. One results file per run, not appended.
 - Cite sources (arxiv, GitHub) in research docs.
 

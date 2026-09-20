@@ -7,7 +7,7 @@
   weights — see `docs/runs/2026-09-20-official-protocol-full97.md` for how
   the Q4_0 run was produced; the F32 control was the box run left
   "running" in that doc, finished this update). F32 fetched read-only:
-  `scp -i ~/.ssh/id_gpu_box user@REDACTED_IP:/path/to/repo/t0-web/results/f32/{all_results.csv,timing_summary.json} results/full97/f32/`.
+  `scp gpu-box:/path/to/t0-web/results/f32/{all_results.csv,timing_summary.json} results/full97/f32/`.
 - Baseline: Seasonal Naive per-config results, fetched read-only from
   `github.com/SalesforceAIResearch/gift-eval`, commit `9a014e9e8ea130ba39c100c60d5dcbab7db57ac9`,
   `results/seasonal_naive/all_results.csv` (`git clone --depth 1` into
