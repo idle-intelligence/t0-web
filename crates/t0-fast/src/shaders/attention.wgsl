@@ -4,9 +4,14 @@
 // of the three 512-wide q/k/v segments), applies the additive mask,
 // softmax, and writes the concatenated-heads output ([outer*seq, embed]).
 const HEAD_DIM: u32 = 64u;
-// Model max is 32 (max_horizon=1024 / patch_size=32); 128 leaves headroom
-// for group-attention's seq=variate-chunk-count on a batched forecast too.
-const MAX_SEQ: u32 = 128u;
+// Model max used to be 32 (max_horizon=1024 / patch_size=32) with 128 as
+// headroom for group-attention's seq=variate-chunk-count on a batched
+// forecast; long-context rollout (t0_core::forecast_rollout) needs whole
+// windows up to context_width+horizon = 8192+1024 = 9216 -> 288 patches, but
+// 256 is WebGPU's hard workgroup-invocation cap (one thread per seq
+// position), so windows wider than 256 patches must be chunked by the
+// caller -- t0-fast doesn't do that itself.
+const MAX_SEQ: u32 = 256u;
 
 struct Dims { outer: u32, seq: u32, heads: u32, embed: u32, qkv_stride: u32, mask_outer_stride: u32, scale: f32, _pad0: u32 };
 
@@ -15,7 +20,7 @@ struct Dims { outer: u32, seq: u32, heads: u32, embed: u32, qkv_stride: u32, mas
 @group(0) @binding(2) var<storage, read_write> out: array<f32>;
 @group(0) @binding(3) var<uniform> dims: Dims;
 
-@compute @workgroup_size(128)
+@compute @workgroup_size(256)
 fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) lid: vec3<u32>) {
     let owh = wg.x;
     let outer = owh / dims.heads;

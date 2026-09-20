@@ -109,7 +109,7 @@ pub fn forecast(engine: &Engine, model: &GpuModel, context: &[f32], v: usize, t_
 /// each signal gets a distinct group id, so group-attention layers never
 /// mix them even though they share one forward pass / one command
 /// encoder). Chunked so `chunk_size` bounds the group-attention `seq`
-/// (`attention.wgsl`'s `MAX_SEQ=128` -- see model.rs); 0 or
+/// (`attention.wgsl`'s `MAX_SEQ=256` -- see model.rs); 0 or
 /// `>= n_signals` means "no chunking, one forward pass".
 pub async fn forecast_batch_chunked_async(
     engine: &Engine,

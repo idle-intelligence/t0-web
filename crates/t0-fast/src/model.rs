@@ -576,14 +576,15 @@ fn rope(
 }
 
 /// `seq` (patch count for time layers, variate-chunk size for group layers)
-/// is capped by `MAX_SEQ` in `attention.wgsl` (128 -- comfortably above the
-/// model's real max of 32 patches at `max_horizon=1024`/`patch_size=32`,
-/// and above any realistic batch-chunk variate count). One kernel, one
-/// code path regardless of `seq`; this assert only catches a config this
-/// crate has never been exercised against.
+/// is capped by `MAX_SEQ` in `attention.wgsl` (256, WebGPU's workgroup-
+/// invocation cap -- one thread per seq position -- and enough for
+/// `forecast_rollout`'s long-context windows, e.g. 160 patches at
+/// context=4096/horizon=1024). One kernel, one code path regardless of
+/// `seq`; this assert only catches a config this crate has never been
+/// exercised against.
 #[allow(clippy::too_many_arguments)]
 fn attention(engine: &Engine, encoder: &mut wgpu::CommandEncoder, key: &str, qkv: &wgpu::Buffer, mask: &wgpu::Buffer, outer: u32, seq: u32, heads: u32, embed: u32) -> wgpu::Buffer {
-    debug_assert!(seq <= 128, "seq_len {seq} exceeds MAX_SEQ=128 in attention.wgsl");
+    debug_assert!(seq <= 256, "seq_len {seq} exceeds MAX_SEQ=256 in attention.wgsl");
     let pool = &engine.pool;
     let qkv_stride = 3 * embed;
     let out = pool.data(&format!("{key}.out"), (outer * seq * embed) as usize);
