@@ -296,13 +296,28 @@ Fusion row is a prior session's state, `docs/runs/2026-09-20-perf.md` — pre-fu
 
 **Full 97-config official-protocol run (Q4_0, RTX 3080 box):** aggregate
 (geometric mean, raw non-naive-normalized MASE/CRPS, same formula as
-above) MASE 1.0252, CRPS 0.1254, 97/97 configs, F32 control pending
-(running on the box). Not directly comparable to the 8-config aggregates
-above (different, much larger config set) or to the model card's
-normalized leaderboard numbers (CRPS 0.4941, MASE 0.7240,
-`theforecastingcompany/t0-alpha` `README.md` lines 319-320) — see
+above) MASE 1.0252, CRPS 0.1254, 97/97 configs. This raw aggregate is
+**not** the number comparable to the model card — see
 `docs/runs/2026-09-20-official-protocol-full97.md` for the full per-config
 table and the normalization caveat.
+
+**Normalized to the GIFT-Eval leaderboard convention** (per-config MASE/CRPS
+divided by Seasonal Naive's on the same config, then geometric mean over
+the 97 configs — the exact formula in `SalesforceAIResearch/gift-eval`
+`notebooks/zeus.ipynb`, commit `9a014e9e8ea130ba39c100c60d5dcbab7db57ac9`;
+baseline from that repo's `results/seasonal_naive/all_results.csv`, copied
+into this repo at `results/seasonal_naive/all_results.csv`; tool:
+`tools/score_official_protocol.py --results-csv ... --normalize-by ...`,
+0/97 unmatched configs): **Q4_0 normalized MASE 0.7334, CRPS 0.4973** — this
+is the number directly comparable to the model card's F32 numbers (CRPS
+0.4941, MASE 0.7240, `theforecastingcompany/t0-alpha` `README.md` lines
+319-320): +1.3% MASE, +0.6% CRPS, consistent with a small expected Q4_0
+lossy-quantization gap rather than a protocol mismatch. F32 control:
+pending (full-97 F32 run on the box was still in progress as of the prior
+session's write-up); rerun the same command against
+`results/full97/f32/all_results.csv` once it lands. Full per-config
+normalized table and the 8-config-subset non-availability note:
+`docs/runs/2026-09-20-official-protocol-full97-normalized.md`.
 
 Footnote — this repo's own 512-context-capped GIFT-Eval subset (not the official 8192-context protocol; `docs/runs/2026-09-19-gifteval-subset.md`, extended this session with `t0-cli gifteval --backend fast`): reference F32 0.0897/1.2139, our (Burn) F32 0.0897/1.2139, our (Burn) Q8_0 0.0897/1.2139, our (Burn) Q4_0 0.0898/1.2157, **our t0-fast Q8_0-resident 0.0897/1.2139 (bit-for-bit aggregate match to Burn's Q8_0 row, every per-task value identical)**, **our t0-fast Q4_0-resident 0.0898/1.2157 (same exact match to Burn's Q4_0 row)**.
 
