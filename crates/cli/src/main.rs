@@ -719,9 +719,9 @@ fn cmd_bench_fast(weights_path: &Path, config_path: Option<&Path>, n_signals: us
     for _ in 0..warmup {
         let _ = run()?;
     }
-    engine.pool.reset_alloc_count();
+    model.pool.reset_alloc_count();
     let _ = run()?;
-    let warm_alloc_count = engine.pool.alloc_count();
+    let warm_alloc_count = model.pool.alloc_count();
 
     let mut times = Vec::with_capacity(reps);
     for _ in 0..reps {
