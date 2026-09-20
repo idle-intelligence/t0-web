@@ -3,7 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>t0-web — idle intelligence</title>
+    <title>t0-web - idle intelligence</title>
+    <link rel="icon" href="favicon.ico">
+    <link rel="apple-touch-icon" href="apple-touch-icon.png">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
@@ -39,6 +41,14 @@
             color: var(--muted);
             letter-spacing: 0.02em;
             margin-bottom: 2px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .org img {
+            width: 16px;
+            height: 16px;
+            border-radius: 2px;
         }
         h1 {
             font-family: 'IBM Plex Mono', monospace;
@@ -83,11 +93,6 @@
             gap: 8px;
             font-size: 14px;
         }
-        #status-text {
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
         .status-dot {
             width: 6px;
             height: 6px;
@@ -106,27 +111,12 @@
             0%, 100% { opacity: 1; }
             50% { opacity: 0.4; }
         }
-        canvas {
-            display: block;
-            width: 100%;
-        }
-        .io-chart {
-            height: 220px;
-            border: 1px solid var(--border);
-            background: var(--bg);
-        }
-        #inputChart { cursor: crosshair; touch-action: none; }
-        .info {
-            font-size: 13px;
-            color: var(--faint);
-            margin-top: 12px;
-        }
-        .actions {
+
+        .controls {
             display: flex;
-            gap: 8px;
-            flex-wrap: wrap;
             align-items: center;
-            margin-top: 12px;
+            gap: 12px;
+            flex-wrap: wrap;
         }
         button {
             font-family: 'IBM Plex Mono', monospace;
@@ -147,41 +137,34 @@
             opacity: 0.3;
             cursor: not-allowed;
         }
-        .series-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-            gap: 8px;
-            margin-bottom: 12px;
-        }
-        .series-btn {
-            font-family: 'IBM Plex Mono', monospace;
-            font-size: 12px;
-            padding: 8px 12px;
-            cursor: pointer;
-            border: 1px solid var(--border);
-            background: transparent;
-            color: var(--text);
-            text-align: center;
-            transition: border-color 0.15s;
-        }
-        .series-btn:hover:not(:disabled) { border-color: var(--text); }
-        .series-btn:disabled { opacity: 0.3; cursor: not-allowed; }
-        .series-btn.active {
+        button.primary {
             background: var(--text);
             color: var(--bg);
             border-color: var(--text);
         }
-        .model-grid {
+        button.primary:hover:not(:disabled) {
+            background: var(--muted);
+            border-color: var(--muted);
+        }
+        .info {
+            font-size: 13px;
+            color: var(--faint);
+            margin-top: 12px;
+        }
+        .voice-grid {
             display: grid;
             grid-template-columns: repeat(4, 1fr);
             gap: 8px;
         }
-        .model-btn {
+        .voice-grid.inactive {
+            opacity: 0.35;
+            pointer-events: none;
+        }
+        .voice-btn {
             font-family: 'IBM Plex Mono', monospace;
             font-size: 13px;
             font-weight: 500;
-            height: 37px;
-            padding: 0 4px;
+            padding: 6px 0;
             cursor: pointer;
             border: 1px solid var(--border);
             background: transparent;
@@ -190,9 +173,93 @@
             text-align: center;
             transition: border-color 0.15s, background 0.15s, color 0.15s;
         }
-        .model-btn:hover:not(:disabled) { border-color: var(--text); }
-        .model-btn:disabled { opacity: 0.3; cursor: not-allowed; }
-        .model-btn.active {
+        .voice-btn:hover:not(:disabled) {
+            border-color: var(--text);
+        }
+        .voice-btn:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+        .voice-btn.active {
+            background: var(--text);
+            color: var(--bg);
+            border-color: var(--text);
+        }
+        .voice-btn.loading {
+            border-color: var(--yellow);
+            color: var(--yellow);
+        }
+
+        .model-selector {
+            display: flex;
+            gap: 16px;
+            align-items: center;
+        }
+        .model-selector label {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 13px;
+            color: var(--text);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .model-selector input[type="radio"] {
+            cursor: pointer;
+        }
+
+        footer {
+            border-top: 1px solid var(--border);
+            padding-top: 24px;
+            margin-top: 24px;
+        }
+        footer a {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 13px;
+            color: var(--faint);
+            text-decoration: none;
+        }
+        footer a:hover { color: var(--muted); }
+
+        /* ---- t0-specific: model selector wrapping, origin chart, output
+           legend/metrics, footer credit lines. Same variables/sizes as
+           the base style above. ---- */
+        .model-selector {
+            flex-wrap: wrap;
+            row-gap: 8px;
+        }
+        #status-text {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+        }
+        .io-chart {
+            height: 220px;
+            border: 1px solid var(--border);
+            background: var(--bg);
+        }
+        #inputChart { cursor: crosshair; touch-action: none; }
+        .series-btn {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 13px;
+            font-weight: 500;
+            padding: 6px 16px;
+            cursor: pointer;
+            border: 1px solid var(--border);
+            background: transparent;
+            color: var(--text);
+            border-radius: 0;
+            text-align: center;
+            margin-bottom: 12px;
+            transition: border-color 0.15s, background 0.15s, color 0.15s;
+        }
+        .series-btn:hover:not(:disabled) { border-color: var(--text); }
+        .series-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+        .series-btn.active {
             background: var(--text);
             color: var(--bg);
             border-color: var(--text);
@@ -219,7 +286,6 @@
             margin-top: 6px;
             line-height: 1.5;
         }
-
         #metricsCard { display: none; }
         .metrics-grid {
             display: grid;
@@ -240,32 +306,20 @@
             letter-spacing: 0.04em;
             margin-top: 2px;
         }
-
-        footer {
-            border-top: 1px solid var(--border);
-            padding-top: 24px;
-            margin-top: 24px;
-        }
         footer .credit {
             font-size: 13px;
             color: var(--faint);
             line-height: 1.6;
-            margin-bottom: 8px;
+            margin-top: 16px;
         }
+        footer .credit + .credit { margin-top: 8px; }
         footer .credit a { text-decoration: underline; color: var(--faint); }
         footer .credit a:hover { color: var(--muted); }
-        footer a {
-            font-family: 'IBM Plex Mono', monospace;
-            font-size: 13px;
-            color: var(--faint);
-            text-decoration: none;
-        }
-        footer a:hover { color: var(--muted); }
     </style>
 </head>
 <body>
     <header>
-        <p class="org">idle intelligence</p>
+        <p class="org"><img src="apple-touch-icon.png" alt="II">idle intelligence</p>
         <h1>t0-web</h1>
         <p class="tagline">
             t0-alpha and t0-beta, quantized to 4 or 8 bit, forecasting one
@@ -277,12 +331,17 @@
     </header>
 
     <section>
-        <h2>MODEL</h2>
-        <div class="model-grid" id="modelGrid"></div>
+        <h2>settings <span class="sub">· model</span></h2>
+        <div class="model-selector">
+            <label><input type="radio" name="model" value="alpha-q8"> alpha Q8_0 (109 MB)</label>
+            <label><input type="radio" name="model" value="alpha-q4" checked> alpha Q4_0 (59 MB)</label>
+            <label><input type="radio" name="model" value="beta-q8"> beta Q8_0 (275 MB)</label>
+            <label><input type="radio" name="model" value="beta-q4"> beta Q4_0 (149 MB)</label>
+        </div>
     </section>
 
     <section>
-        <h2>STATUS</h2>
+        <h2>status</h2>
         <div class="status">
             <span class="status-dot" id="statusDot"></span>
             <span id="status-text">Initializing...</span>
@@ -290,52 +349,53 @@
     </section>
 
     <section>
-        <h2>INPUT <span class="sub">· US births, daily</span></h2>
-        <div class="series-grid" id="seriesGrid"></div>
+        <h2>input <span class="sub">· US births, daily</span></h2>
+        <button type="button" class="series-btn active" disabled>US births</button>
         <canvas id="inputChart" class="io-chart"></canvas>
         <p class="info">US births per day, July to November 1988. Drag the origin to choose where the model forecasts from.</p>
-        <div class="actions">
-            <button id="forecastBtn" type="button" disabled>Forecast</button>
+        <div class="controls">
+            <button id="forecastBtn" class="primary" type="button" disabled>Forecast</button>
         </div>
     </section>
 
     <section>
-        <h2>OUTPUT <span class="sub">· 32-day forecast</span></h2>
+        <h2>output <span class="sub">· 32-day forecast</span></h2>
         <canvas id="outputChart" class="io-chart"></canvas>
         <div class="legend">
             <span class="left">
                 <span><span class="swatch-actual">•••</span> actual</span>
-                <span><span class="swatch-forecast">—</span> forecast</span>
+                <span><span class="swatch-forecast">--</span> forecast</span>
                 <span><span class="swatch-band">▮</span> Q10–Q90</span>
             </span>
             <span class="right">
-                inside band <span id="metricInside">—</span> ·
-                CRPS <span id="metricCrps">—</span> ·
-                vs weekly naive <span id="metricNaive">—</span>
+                inside band <span id="metricInside">-</span> ·
+                CRPS <span id="metricCrps">-</span> ·
+                vs weekly naive <span id="metricNaive">-</span>
             </span>
         </div>
         <p class="panel-desc">Inside band: days whose real value fell within the 10–90% range; a well-calibrated band catches about 26 of 32. CRPS: error of the whole probabilistic forecast, in births per day, lower is better. Vs weekly naive: error relative to repeating last week; below 1 beats it.</p>
     </section>
 
     <section id="metricsCard">
-        <h2>PERFORMANCE</h2>
+        <h2>performance</h2>
         <div class="metrics-grid">
             <div class="metric">
-                <div class="metric-value" id="metricMs">—</div>
+                <div class="metric-value" id="metricMs">-</div>
                 <div class="metric-label">MS / FORECAST</div>
             </div>
             <div class="metric">
-                <div class="metric-value" id="metricSize">—</div>
+                <div class="metric-value" id="metricSize">-</div>
                 <div class="metric-label">MODEL SIZE</div>
             </div>
             <div class="metric">
-                <div class="metric-value" id="metricBackend">—</div>
+                <div class="metric-value" id="metricBackend">-</div>
                 <div class="metric-label">BACKEND</div>
             </div>
         </div>
     </section>
 
     <footer>
+        <a href="https://idleintelligence.org">idleintelligence.org</a>
         <p class="credit">
             Weights: <a href="https://huggingface.co/idle-intelligence/t0-alpha-q8_0-webgpu">alpha Q8_0</a> ·
             <a href="https://huggingface.co/idle-intelligence/t0-alpha-q4_0-webgpu">alpha Q4_0</a> ·
@@ -345,13 +405,11 @@
             Custom Rust inference compiled to WebAssembly.
         </p>
         <p class="credit">Data: US daily births, 1969–1988 (<a href="./data/README.md">source + license</a>).</p>
-        <a href="https://idleintelligence.org">idleintelligence.org</a>
     </footer>
 
     <script type="module">
         const statusDot = document.getElementById('statusDot');
         const statusTextEl = document.getElementById('status-text');
-        const seriesGrid = document.getElementById('seriesGrid');
         const inputCanvas = document.getElementById('inputChart');
         const inputCtx = inputCanvas.getContext('2d');
         const outputCanvas = document.getElementById('outputChart');
@@ -384,7 +442,7 @@
         }
 
         // STATUS is a single line, replaced as state changes: "downloading
-        // model: N%" -> "model loaded, <backend>" -> "forecast in <ms> ms".
+        // model: N%" -> "ready, engine: <backend>" -> "forecast in <ms> ms".
         function setDot(state) {
             statusDot.className = 'status-dot ' + state;
         }
@@ -461,12 +519,18 @@
                 return h;
             },
             models() {
-                return Array.from(modelGrid.children).map((b) => ({ key: b.dataset.key, label: b.textContent, active: b.classList.contains('active') }));
+                return modelInputs.map((input) => ({
+                    key: input.value,
+                    label: input.closest('label').textContent.trim(),
+                    active: input.value === currentModelKey,
+                }));
             },
             currentModel() {
                 return currentModelKey;
             },
             selectModel(key) {
+                const input = modelInputs.find((i) => i.value === key);
+                if (input) input.checked = true;
                 selectModel(key);
             },
         };
@@ -693,10 +757,10 @@
         // excluded from every one of these). ----
         function updateMetrics() {
             if (!lastForecast || lastForecast.origin !== ORIGIN) {
-                metricInside.textContent = '—';
-                metricCrps.textContent = '—';
-                metricNaive.textContent = '—';
-                metricMs.textContent = '—';
+                metricInside.textContent = '-';
+                metricCrps.textContent = '-';
+                metricNaive.textContent = '-';
+                metricMs.textContent = '-';
                 return;
             }
             const { quantiles, horizon: hZ, nQuantiles: nq, ms } = lastForecast;
@@ -783,53 +847,29 @@
             commitOrigin(markerOrigin);
         });
 
-        // ---- series picker: prepared for more entries later, currently
-        // just the one active series (web/data/index.json). ----
-        async function loadSeriesIndex() {
-            try {
-                const list = await fetch('./data/index.json').then((r) => r.json());
-                seriesGrid.innerHTML = '';
-                for (const entry of list) {
-                    const btn = document.createElement('button');
-                    btn.className = 'series-btn active';
-                    btn.type = 'button';
-                    btn.textContent = entry.name;
-                    seriesGrid.appendChild(btn);
-                }
-            } catch (err) {
-                console.warn('[t0] could not load series index:', err);
-            }
-        }
-        loadSeriesIndex();
-
-        // ---- model row: four family-style buttons, one MODELS table lives
-        // in worker.js -- this just renders whatever list it announces.
-        const modelGrid = document.getElementById('modelGrid');
+        // ---- model row: four radios, one MODELS table lives in
+        // worker.js -- this just tracks which one is active/loading.
+        const modelInputs = Array.from(document.querySelectorAll('input[name="model"]'));
         let currentModelKey = null;
         let modelSwitching = false;
 
-        function setModelButtonsEnabled(activeKey) {
-            for (const btn of modelGrid.children) {
-                btn.disabled = btn.dataset.key === activeKey;
-                btn.classList.toggle('active', btn.dataset.key === activeKey);
+        function setModelInputsEnabled(activeKey) {
+            for (const input of modelInputs) {
+                input.disabled = input.value === activeKey;
             }
         }
 
-        function renderModelButtons(list, defaultKey) {
-            modelGrid.innerHTML = '';
-            currentModelKey = defaultKey;
-            for (const { key, label } of list) {
-                const btn = document.createElement('button');
-                btn.className = 'model-btn';
-                btn.type = 'button';
-                btn.textContent = label;
-                btn.dataset.key = key;
-                btn.disabled = true; // enabled once the current model is ready
-                btn.addEventListener('click', () => selectModel(key));
-                modelGrid.appendChild(btn);
-            }
-            setModelButtonsEnabled(defaultKey);
-        }
+        modelInputs.forEach((input) => {
+            input.addEventListener('change', () => {
+                if (modelSwitching || forecasting) {
+                    input.checked = false;
+                    const current = modelInputs.find((i) => i.value === currentModelKey);
+                    if (current) current.checked = true;
+                    return;
+                }
+                selectModel(input.value);
+            });
+        });
 
         function selectModel(key) {
             if (modelSwitching || forecasting || key === currentModelKey) return;
@@ -839,7 +879,7 @@
             lastForecast = null;
             window.__app.lastForecast = null;
             metricsCard.style.display = 'none';
-            for (const btn of modelGrid.children) btn.disabled = true;
+            for (const input of modelInputs) input.disabled = true;
             setDot('loading');
             setStatus('Loading...');
             worker.postMessage({ type: 'load', modelKey: key });
@@ -849,7 +889,8 @@
             const msg = e.data;
             switch (msg.type) {
                 case 'models':
-                    renderModelButtons(msg.list, msg.defaultKey);
+                    currentModelKey = msg.defaultKey;
+                    setModelInputsEnabled(msg.defaultKey);
                     break;
                 case 'status':
                     setDot('loading');
@@ -879,7 +920,7 @@
                     window.__app.ready = true;
                     modelSwitching = false;
                     currentModelKey = msg.modelKey;
-                    setModelButtonsEnabled(currentModelKey);
+                    setModelInputsEnabled(currentModelKey);
                     forecastBtn.disabled = false;
                     drawAll();
                     runForecast();
@@ -902,7 +943,7 @@
                     forecasting = false;
                     forecastBtn.disabled = false;
                     modelSwitching = false;
-                    setModelButtonsEnabled(currentModelKey);
+                    setModelInputsEnabled(currentModelKey);
                     setDot('error');
                     setStatus('Error: ' + msg.message);
                     console.error(msg.message);
