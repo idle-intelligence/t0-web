@@ -1,19 +1,16 @@
 #!/usr/bin/env bash
-# Build the fast/CPU wasm backend and publish the committed HEAD's web/
-# demo to an orphan `gh-pages` branch, following the layout used by
-# ../stt-web (repo root = the served tree, no crates/ or models/,
-# no .nojekyll -- stt-web's own gh-pages doesn't carry one either).
+# Build both wasm engines and publish the committed HEAD's web/ demo to an
+# orphan `gh-pages` branch, following the layout used by ../tts-web and
+# ../stt-web (repo root = the served tree, no crates/ or models/).
 #
-# t0-web's web/worker.js resolves the wasm module at `${PKG_DIR}/t0_wasm.js`
-# relative to itself (PKG_DIR is './pkg' or './pkg-wgpu', picked at runtime
-# by navigator.gpu -- see crates/t0-wasm/README.md), unlike stt-web where
-# pkg/ sits one level up from web/. This script only builds the `fast`
-# feature (single CPU backend, no Burn), so it publishes that build as
-# `web/pkg` -- the path worker.js already falls back to when
-# navigator.gpu is absent. No edit to worker.js is needed. Browsers that
-# do expose navigator.gpu will still request `web/pkg-wgpu`, which this
-# script does not build or publish; that's a known gap, not a bug in this
-# script (the task only asked for the `fast` build).
+# web/worker.js resolves the wasm module at `${PKG_DIR}/t0_wasm.js`
+# relative to itself, where PKG_DIR is picked at runtime:
+#   ./pkg-wgpu  when a WebGPU adapter is available  -> the `fast` build
+#               (crates/t0-fast, WGSL kernels, the engine the benchmarks
+#               and the model cards quote)
+#   ./pkg       otherwise                            -> the `ndarray` build
+#               (Burn CPU backend)
+# Both are published so every browser gets a working path.
 #
 # Never checks out gh-pages in the main working tree; never pushes.
 set -euo pipefail
@@ -30,29 +27,35 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "==> Building t0-wasm (fast feature, release)"
+echo "==> Building t0-wasm (fast feature, WebGPU engine)"
 wasm-pack build crates/t0-wasm --target web --out-dir pkg-fast --release --no-default-features --features fast
+echo "==> Building t0-wasm (ndarray feature, CPU engine)"
+wasm-pack build crates/t0-wasm --target web --out-dir pkg --release
 
-PKG_SRC="$REPO_ROOT/crates/t0-wasm/pkg-fast"
-if [ ! -f "$PKG_SRC/t0_wasm.js" ] || [ ! -f "$PKG_SRC/t0_wasm_bg.wasm" ]; then
-    echo "error: expected build output not found in $PKG_SRC" >&2
-    exit 1
-fi
+FAST_SRC="$REPO_ROOT/crates/t0-wasm/pkg-fast"
+CPU_SRC="$REPO_ROOT/crates/t0-wasm/pkg"
+for d in "$FAST_SRC" "$CPU_SRC"; do
+    if [ ! -f "$d/t0_wasm.js" ] || [ ! -f "$d/t0_wasm_bg.wasm" ]; then
+        echo "error: expected build output not found in $d" >&2
+        exit 1
+    fi
+done
 
 echo "==> Exporting committed HEAD's web/ into $EXPORT_DIR"
 mkdir -p "$EXPORT_DIR"
 git archive HEAD web | tar -x -C "$EXPORT_DIR"
 
-echo "==> Placing pkg-fast build at web/pkg (the path worker.js resolves when navigator.gpu is absent)"
-rm -rf "$EXPORT_DIR/web/pkg"
-mkdir -p "$EXPORT_DIR/web/pkg"
-cp "$PKG_SRC/t0_wasm.js" "$PKG_SRC/t0_wasm_bg.wasm" "$EXPORT_DIR/web/pkg/"
-[ -f "$PKG_SRC/package.json" ] && cp "$PKG_SRC/package.json" "$EXPORT_DIR/web/pkg/"
+place() { # src dir, dest dir
+    rm -rf "$2"; mkdir -p "$2"
+    cp "$1/t0_wasm.js" "$1/t0_wasm_bg.wasm" "$2/"
+    [ -f "$1/package.json" ] && cp "$1/package.json" "$2/"
+}
+echo "==> Placing the fast build at web/pkg-wgpu and the ndarray build at web/pkg"
+place "$FAST_SRC" "$EXPORT_DIR/web/pkg-wgpu"
+place "$CPU_SRC" "$EXPORT_DIR/web/pkg"
 
-# web/models is gitignored (weights fetched/cached at runtime by the
-# browser, not shipped) -- git archive of HEAD already excludes it, and
-# web/data (the bundled series fixture) is small and kept, matching
-# stt-web's web/test-bria.wav being committed as demo fixture data.
+# web/models is gitignored (weights are fetched from Hugging Face and
+# cached by the browser, never shipped); git archive already excludes it.
 if [ -d "$EXPORT_DIR/web/models" ]; then
     echo "error: unexpected web/models in export -- refusing to publish weights" >&2
     exit 1
@@ -68,8 +71,6 @@ else
     git -C "$WORKTREE_DIR" rm -rf . >/dev/null 2>&1 || true
 fi
 
-# Replace the worktree's tracked content with the fresh export (root of
-# the branch = the served tree, mirroring stt-web's gh-pages layout).
 find "$WORKTREE_DIR" -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
 cp -R "$EXPORT_DIR/web" "$WORKTREE_DIR/web"
 
@@ -78,9 +79,8 @@ git add -A
 if git diff --cached --quiet; then
     echo "==> No changes; gh-pages already up to date"
 else
-    git commit -q -m "Publish web/ demo (t0-alpha, fast/CPU backend) to GitHub Pages"
+    git commit -q -m "Publish web/ demo (WebGPU and CPU engines) to GitHub Pages"
 fi
 cd "$REPO_ROOT"
 
-TIP="$(git rev-parse gh-pages)"
-echo "==> gh-pages tip: $TIP"
+echo "==> gh-pages tip: $(git rev-parse gh-pages)"
