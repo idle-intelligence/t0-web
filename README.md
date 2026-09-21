@@ -4,7 +4,7 @@ t0-alpha and t0-beta, The Forecasting Company's time-series foundation models, r
 
 [**Try the demo →**](https://idle-intelligence.github.io/t0-web/web/)
 
-[**Compare page**](bench/compare/): the same engine next to the official ONNX INT8 export and an F32 reference, side by side in one tab. Runs locally (see `docs/runs/2026-09-20-compare-page.md`). Be advised: a run downloads all the models it compares, about 700 MB, and runs them all.
+[**Try the compare page →**](https://idle-intelligence.github.io/t0-web/bench/compare/): the same engine next to the official ONNX INT8 export and, opt-in, an F32 reference, side by side in one tab (see `docs/runs/2026-09-20-compare-page.md`). Be advised: a run downloads both models it compares, about 270 MB; turning on the F32 reference adds about 410 MB more, for about 680 MB total.
 
 > **Disclaimer:** independent port by ilnmtlbnm@idle-intelligence, not affiliated with or endorsed by The Forecasting Company. Weights are quantized from [theforecastingcompany/t0-alpha](https://huggingface.co/theforecastingcompany/t0-alpha) and [theforecastingcompany/t0-beta](https://huggingface.co/theforecastingcompany/t0-beta) (Apache-2.0); forecasts may differ slightly from the PyTorch implementation.
 
@@ -108,7 +108,7 @@ t0-cli bench --weights t0-alpha-q4_0.gguf --backend ndarray --signals 1000 --con
 
 ## Publishing the demo
 
-`tools/publish-pages.sh` builds both wasm engines (`fast` for WebGPU at `web/pkg-wgpu`, `ndarray` for CPU at `web/pkg`) and republishes committed HEAD's `web/` to an orphan `gh-pages` branch, following `../tts-web`'s layout (repo root = the served tree). Run it, then `git push origin gh-pages --force-with-lease`. GitHub Pages source: branch `gh-pages`, folder `/`.
+`tools/publish-pages.sh` builds both wasm engines (`fast` for WebGPU at `web/pkg-wgpu`, `ndarray` for CPU at `web/pkg`) and republishes committed HEAD's `web/` to an orphan `gh-pages` branch, following `../tts-web`'s layout (repo root = the served tree). It also copies `bench/compare/index.html` and `bench/compare/compare.js` (no assets: that page loads everything from Hugging Face and jsdelivr). Run it, then `git push origin gh-pages --force-with-lease`. GitHub Pages source: branch `gh-pages`, folder `/`.
 
 ## What's not done yet
 
