@@ -9,12 +9,41 @@
 // per this repo's rule of driving the demo through a small API rather than
 // DOM clicks in Playwright.
 
-const ONNX_MODEL_URL = '../onnx/t0-alpha-grouped-int8.onnx';
-const ONNX_SERIES_URL = '../onnx/series.f32';
-const OURS_PKG = '../ours/pkg-fast/t0_wasm.js';
-const OURS_GGUF = { q8_0: '../ours/t0-alpha-q8_0.gguf', q4_0: '../ours/t0-alpha-q4_0.gguf' };
-const OURS_F32_SAFETENSORS = '../ours/t0-alpha-f32.safetensors';
-const OURS_F32_CONFIG = '../ours/t0-alpha-f32-config.json';
+// Set to true to use the gitignored bench/onnx and bench/ours folders on
+// disk instead of Hugging Face and the CDN. Off by default: this is the
+// mode that gets published to GitHub Pages.
+const LOCAL_ASSETS = false;
+
+// Matches the pinned onnxruntime-web build committed at bench/onnx/ (see
+// its "ONNX Runtime Web v1.29.0" banner) and the manifest.json served
+// alongside the official INT8 export.
+const ORT_VERSION = '1.29.0';
+const ORT_CDN_BASE = `https://cdn.jsdelivr.net/npm/onnxruntime-web@${ORT_VERSION}/dist/`;
+const ORT_SCRIPT_URL = LOCAL_ASSETS ? '../onnx/ort.webgpu.min.js' : `${ORT_CDN_BASE}ort.webgpu.min.js`;
+const ORT_WASM_PATHS = LOCAL_ASSETS ? '../onnx/' : ORT_CDN_BASE;
+
+// Same engine-build version tag web/worker.js uses on its wasm URLs, so a
+// hard reload here picks up a rebuilt pkg-wgpu the same way the demo does.
+const ENGINE_BUILD = '2026-09-21';
+
+const ONNX_MODEL_URL = LOCAL_ASSETS
+    ? '../onnx/t0-alpha-grouped-int8.onnx'
+    : 'https://huggingface.co/theforecastingcompany/t0-alpha-onnx-int8/resolve/main/t0-alpha-grouped-int8.onnx';
+const ONNX_SERIES_URL = LOCAL_ASSETS ? '../onnx/series.f32' : '../../web/data/series.f32';
+const OURS_PKG = LOCAL_ASSETS ? '../ours/pkg-fast/t0_wasm.js' : `../../web/pkg-wgpu/t0_wasm.js?v=${ENGINE_BUILD}`;
+const OURS_GGUF = LOCAL_ASSETS
+    ? { q8_0: '../ours/t0-alpha-q8_0.gguf', q4_0: '../ours/t0-alpha-q4_0.gguf' }
+    : {
+        q8_0: 'https://huggingface.co/idle-intelligence/t0-alpha-q8_0-webgpu/resolve/main/t0-alpha-q8_0.gguf',
+        q4_0: 'https://huggingface.co/idle-intelligence/t0-alpha-q4_0-webgpu/resolve/main/t0-alpha-q4_0.gguf',
+    };
+// F32 reference is opt-in (407 MB download) -- see the checkbox wiring below.
+const OURS_F32_SAFETENSORS = LOCAL_ASSETS
+    ? '../ours/t0-alpha-f32.safetensors'
+    : 'https://huggingface.co/theforecastingcompany/t0-alpha/resolve/main/model.safetensors';
+const OURS_F32_CONFIG = LOCAL_ASSETS
+    ? '../ours/t0-alpha-f32-config.json'
+    : 'https://huggingface.co/theforecastingcompany/t0-alpha/resolve/main/config.json';
 
 const CH_OPTIONS = [
     { context: 512, horizon: 32 },
@@ -40,8 +69,26 @@ const FORCE_CPU_NODE_NAMES = [
     'node_bitwise_or_2', 'node_bitwise_and_6', 'node_sinh',
 ];
 
-ort.env.wasm.wasmPaths = '../onnx/';
-ort.env.wasm.simd = true;
+// onnxruntime-web is loaded lazily (CDN in Pages mode, local file in
+// LOCAL_ASSETS mode) instead of a static <script> tag in index.html, so
+// this same page works from either source. `ort` is a script global once
+// loaded.
+let ortReadyPromise = null;
+function ensureOrt() {
+    if (!ortReadyPromise) {
+        ortReadyPromise = new Promise((resolve, reject) => {
+            const s = document.createElement('script');
+            s.src = ORT_SCRIPT_URL;
+            s.onload = () => resolve();
+            s.onerror = () => reject(new Error(`failed to load onnxruntime-web from ${ORT_SCRIPT_URL}`));
+            document.head.appendChild(s);
+        }).then(() => {
+            ort.env.wasm.wasmPaths = ORT_WASM_PATHS;
+            ort.env.wasm.simd = true;
+        });
+    }
+    return ortReadyPromise;
+}
 
 function median(a) {
     const s = [...a].sort((x, y) => x - y);
@@ -66,6 +113,7 @@ let state = {
     horizon: CH_OPTIONS[0].horizon,
     quant: 'q8_0',
     usePasted: false,
+    useF32: false,
     series: null,
     lastResult: null,
 };
@@ -107,6 +155,11 @@ const pasteLabel = document.getElementById('pasteLabel');
         pasteArea.style.display = state.usePasted ? 'block' : 'none';
         pasteLabel.style.display = state.usePasted ? 'block' : 'none';
     });
+});
+
+const f32Checkbox = document.getElementById('f32Opt');
+f32Checkbox.addEventListener('change', () => {
+    state.useF32 = f32Checkbox.checked;
 });
 
 document.getElementById('runBtn').onclick = () => run();
@@ -156,6 +209,7 @@ function buildOnnxFeeds(contextRows, context, computeHorizon) {
 }
 
 async function makeOnnxSession(ep) {
+    await ensureOrt();
     const opts = { graphOptimizationLevel: 'basic' };
     opts.executionProviders = ep === 'webgpu' ? [{ name: 'webgpu', forceCpuNodeNames: FORCE_CPU_NODE_NAMES }, 'wasm'] : ['wasm'];
     return ort.InferenceSession.create(ONNX_MODEL_URL, opts);
@@ -305,6 +359,7 @@ function renderBatchTable(rows) {
 // 1e-6-scale row (ours vs the true F32 reference) sits next to the
 // quantized-vs-quantized rows so the two error sources aren't conflated.
 const AGREE_NOTE = 'The 1e-6 parity is the II engine against the F32 reference with identical weights; the difference between the two quantized models is the sum of the two quantization errors.';
+const AGREE_NOTE_NO_F32 = 'F32 reference rows need the "F32 reference" opt-in above (adds a 407 MB download); showing TFC (INT8) vs II (quantized) only.';
 const AGREE_COMPARISONS = [
     ['theirsVsOurs', 'TFC (INT8) vs II (quantized)'],
     ['oursVsF32', 'II (quantized) vs F32 reference'],
@@ -312,7 +367,8 @@ const AGREE_COMPARISONS = [
 ];
 
 function renderAgreementTable(agreement) {
-    document.getElementById('agreeNote').textContent = AGREE_NOTE;
+    const comparisons = AGREE_COMPARISONS.filter(([key]) => key in agreement);
+    document.getElementById('agreeNote').textContent = comparisons.length === AGREE_COMPARISONS.length ? AGREE_NOTE : AGREE_NOTE_NO_F32;
     const tbody = document.querySelector('#agreeTable tbody');
     tbody.innerHTML = '';
     const addRow = (label, cmpLabel, r) => {
@@ -320,10 +376,10 @@ function renderAgreementTable(agreement) {
         tr.innerHTML = `<td>${label}</td><td>${cmpLabel}</td><td>${r.maxAbs.toFixed(3)}</td><td>${r.maxAbsPct.toFixed(2)}%</td><td>${r.meanAbs.toFixed(3)}</td><td>${r.meanAbsPct.toFixed(2)}%</td>`;
         tbody.appendChild(tr);
     };
-    for (const [key, cmpLabel] of AGREE_COMPARISONS) addRow('overall', cmpLabel, agreement[key].overall);
+    for (const [key, cmpLabel] of comparisons) addRow('overall', cmpLabel, agreement[key].overall);
     for (let qi = 0; qi < NQ; qi++) {
         const label = `Q${Math.round(QUANTILE_LEVELS[qi] * 100)}`;
-        for (const [key, cmpLabel] of AGREE_COMPARISONS) addRow(label, cmpLabel, agreement[key].perQuantile[qi]);
+        for (const [key, cmpLabel] of comparisons) addRow(label, cmpLabel, agreement[key].perQuantile[qi]);
     }
 }
 
@@ -410,7 +466,7 @@ async function gpuAdapterName() {
 
 // ---- main protocol ----
 async function run(overrideConfig) {
-    const cfg = Object.assign({ context: state.context, horizon: state.horizon, quant: state.quant, usePasted: state.usePasted }, overrideConfig || {});
+    const cfg = Object.assign({ context: state.context, horizon: state.horizon, quant: state.quant, usePasted: state.usePasted, useF32: state.useF32 }, overrideConfig || {});
     document.getElementById('runBtn').disabled = true;
     try {
         setStatus('loading', 'loading series...');
@@ -423,8 +479,11 @@ async function run(overrideConfig) {
         setStatus('loading', 'loading t0-fast (' + cfg.quant + ', ours)...');
         const ours = await loadOurs(cfg.quant);
 
-        setStatus('loading', 'loading t0-fast F32 reference...');
-        const f32Model = await loadOursF32();
+        let f32Model = null;
+        if (cfg.useF32) {
+            setStatus('loading', 'loading t0-fast F32 reference...');
+            f32Model = await loadOursF32();
+        }
 
         setStatus('generating', 'cold calls...');
         const theirsCold = await onnxRun(theirs.session, [context], cfg.context, cfg.horizon);
@@ -504,17 +563,19 @@ async function run(overrideConfig) {
 
         // agreement: computeHorizon on theirs side may exceed cfg.horizon
         // (padded to a multiple of 32) -- slice both down to cfg.horizon.
-        setStatus('generating', 'F32 reference forecast...');
-        const f32Full = await oursRun(f32Model, context, cfg.horizon).then((r) => r.data);
         const theirsFull = theirsLast.data;
         const oursFull = oursLast.data;
         const theirsSliced = new Float64Array(cfg.horizon * NQ);
         for (let t = 0; t < cfg.horizon; t++) for (let qi = 0; qi < NQ; qi++) theirsSliced[t * NQ + qi] = theirsFull[t * NQ + qi];
         const agreement = {
-            oursVsF32: computeAgreement(oursFull, f32Full, cfg.horizon, NQ),
-            theirsVsF32: computeAgreement(theirsSliced, f32Full, cfg.horizon, NQ),
             theirsVsOurs: computeAgreement(theirsSliced, oursFull, cfg.horizon, NQ),
         };
+        if (cfg.useF32) {
+            setStatus('generating', 'F32 reference forecast...');
+            const f32Full = await oursRun(f32Model, context, cfg.horizon).then((r) => r.data);
+            agreement.oursVsF32 = computeAgreement(oursFull, f32Full, cfg.horizon, NQ);
+            agreement.theirsVsF32 = computeAgreement(theirsSliced, f32Full, cfg.horizon, NQ);
+        }
         const theirsBands = extractMedianAndBands(theirsSliced, cfg.horizon, NQ, MEDIAN_IDX);
         const oursBands = extractMedianAndBands(oursFull, cfg.horizon, NQ, MEDIAN_IDX);
 
