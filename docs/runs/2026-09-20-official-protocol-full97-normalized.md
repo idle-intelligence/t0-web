@@ -241,3 +241,22 @@ F32/Q8_0/Q4_0 in `docs/runs/2026-09-20-official-protocol-fast.md`), which is
 a property of the baseline on that dataset, not a t0-alpha-specific
 anomaly — noted here rather than excluded, since the leaderboard formula
 takes all 97 configs as-is.
+
+## Addendum, 2026-09-21: Q8_0 on the same protocol
+
+Same box, same harness, same 97 configs and Seasonal Naive normalization. Run as a detached user unit (`t0-q8-full97`), wall time about 1h10m, `stopped_early: false`, inference time summed over configs 2931 s (`results/full97/q8_0/timing_summary.json`).
+
+```
+.venv/bin/python3 tools/score_official_protocol.py --variant q8_0_full97 \
+    --results-csv results/full97/q8_0/all_results.csv \
+    --normalize-by results/seasonal_naive/all_results.csv
+```
+
+| variant | MASE | CRPS |
+|---|---|---|
+| Published t0-alpha card (F32) | 0.7240 | 0.4941 |
+| Our F32 control | 0.7255 | 0.4942 |
+| Q8_0 | 0.7258 | 0.4943 |
+| Q4_0 | 0.7334 | 0.4973 |
+
+Q8_0 vs our F32 control: +0.04% MASE, +0.02% CRPS, at 0.27x the F32 file size. Q4_0 vs F32 control: +1.1% / +0.6% at 0.14x.
