@@ -2,7 +2,7 @@
   "name": "t0-wasm",
   "type": "module",
   "version": "0.1.0",
-  "license": "Apache-2.0",
+  "license": "MIT",
   "files": [
     "t0_wasm_bg.wasm",
     "t0_wasm.js",

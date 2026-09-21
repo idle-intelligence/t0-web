@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>t0-web compare - idle intelligence</title>
+<link rel="icon" href="../../web/favicon.ico">
+<link rel="apple-touch-icon" href="../../web/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+    :root {
+        --bg: #fdfdfd;
+        --text: #1a1a1a;
+        --muted: #555;
+        --faint: #999;
+        --border: #ddd;
+        --green: #2d7d46;
+        --yellow: #b58900;
+        --red: #c0392b;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+        font-family: 'IBM Plex Sans', -apple-system, sans-serif;
+        max-width: 640px;
+        margin: 0 auto;
+        padding: 48px 24px 96px;
+        color: var(--text);
+        background: var(--bg);
+        line-height: 1.5;
+        font-size: 15px;
+    }
+    a { color: var(--text); }
+    a:hover { color: var(--muted); }
+
+    header { margin-bottom: 48px; }
+    .org {
+        font-family: 'IBM Plex Mono', monospace;
+        font-size: 13px;
+        color: var(--muted);
+        letter-spacing: 0.02em;
+        margin-bottom: 2px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+    .org img {
+        width: 16px;
+        height: 16px;
+        border-radius: 2px;
+    }
+    h1 {
+        font-family: 'IBM Plex Mono', monospace;
+        font-size: 24px;
+        font-weight: 600;
+        margin-bottom: 8px;
+    }
+    .tagline {
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.6;
+    }
+    .tagline a { text-decoration: underline; color: var(--muted); }
+    .tagline a:hover { color: var(--text); }
+    .repo {
+        font-family: 'IBM Plex Mono', monospace;
+        font-size: 13px;
+        margin-top: 4px;
+    }
+    .repo a { color: var(--faint); text-decoration: none; }
+    .repo a:hover { color: var(--muted); }
+
+    section {
+        border-top: 1px solid var(--border);
+        padding: 24px 0;
+    }
+    section h2 {
+        font-family: 'IBM Plex Mono', monospace;
+        font-size: 12px;
+        font-weight: 500;
+        letter-spacing: 0.04em;
+        color: var(--faint);
+        margin-bottom: 12px;
+    }
+    section h2 .sub {
+        font-weight: 400;
+    }
+
+    .status {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 14px;
+    }
+    .status-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--faint);
+        flex-shrink: 0;
+    }
+    .status-dot.loading { background: var(--yellow); }
+    .status-dot.ready { background: var(--green); }
+    .status-dot.error { background: var(--red); }
+    .status-dot.generating {
+        background: var(--text);
+        animation: pulse 1s infinite;
+    }
+    @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.4; }
+    }
+
+    textarea {
+        font-family: 'IBM Plex Sans', -apple-system, sans-serif;
+        font-size: 15px;
+        width: 100%;
+        min-height: 100px;
+        padding: 12px;
+        border: 1px solid var(--border);
+        background: transparent;
+        resize: vertical;
+        color: var(--text);
+        margin-bottom: 12px;
+        line-height: 1.5;
+    }
+    textarea:focus {
+        outline: none;
+        border-color: var(--text);
+    }
+    .controls {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+    }
+    button {
+        font-family: 'IBM Plex Mono', monospace;
+        font-size: 13px;
+        font-weight: 500;
+        padding: 8px 16px;
+        cursor: pointer;
+        border: 1px solid var(--border);
+        background: transparent;
+        color: var(--text);
+        border-radius: 0;
+        transition: border-color 0.15s;
+    }
+    button:hover:not(:disabled) {
+        border-color: var(--text);
+    }
+    button:disabled {
+        opacity: 0.3;
+        cursor: not-allowed;
+    }
+    button.primary {
+        background: var(--text);
+        color: var(--bg);
+        border-color: var(--text);
+    }
+    button.primary:hover:not(:disabled) {
+        background: var(--muted);
+        border-color: var(--muted);
+    }
+    .info {
+        font-size: 13px;
+        color: var(--faint);
+        margin-top: 12px;
+    }
+
+    .model-selector {
+        display: flex;
+        gap: 16px;
+        align-items: center;
+    }
+    .model-selector label {
+        font-family: 'IBM Plex Mono', monospace;
+        font-size: 13px;
+        color: var(--text);
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+    }
+    .model-selector input[type="radio"],
+    .model-selector input[type="checkbox"] {
+        cursor: pointer;
+    }
+
+    footer {
+        border-top: 1px solid var(--border);
+        padding-top: 24px;
+        margin-top: 24px;
+    }
+    footer a {
+        font-family: 'IBM Plex Mono', monospace;
+        font-size: 13px;
+        color: var(--faint);
+        text-decoration: none;
+    }
+    footer a:hover { color: var(--muted); }
+    footer .credit {
+        font-size: 13px;
+        color: var(--faint);
+        line-height: 1.6;
+        margin-top: 16px;
+    }
+    footer .credit a { text-decoration: underline; color: var(--faint); }
+    footer .credit a:hover { color: var(--muted); }
+
+    /* ---- compare-specific: input labels, choice groups, overlay chart,
+       legend swatches, tables, perf lines. Same variables/sizes as the
+       base style above. ---- */
+    label {
+        font-size: 13px;
+        color: var(--muted);
+        display: block;
+        margin-bottom: 6px;
+    }
+    .model-selector { flex-wrap: wrap; margin-bottom: 16px; }
+    canvas { display: block; width: 100%; }
+    .io-chart {
+        height: 240px;
+        border: 1px solid var(--border);
+        background: var(--bg);
+    }
+    .legend {
+        display: flex;
+        gap: 16px;
+        margin-top: 8px;
+        font-size: 12px;
+        color: var(--muted);
+        font-family: 'IBM Plex Mono', monospace;
+    }
+    .swatch-line {
+        display: inline-block;
+        width: 14px;
+        height: 0;
+        border-top: 2px solid;
+        vertical-align: middle;
+        margin-right: 4px;
+    }
+    .swatch-tfc { border-top-color: var(--text); border-top-style: solid; }
+    .swatch-ii { border-top-color: var(--green); border-top-style: dashed; }
+    table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12px;
+        font-family: 'IBM Plex Mono', monospace;
+        margin-bottom: 16px;
+    }
+    th, td { text-align: right; padding: 4px 6px; border-bottom: 1px solid var(--border); }
+    th:first-child, td:first-child { text-align: left; }
+    th { color: var(--faint); font-weight: 500; }
+    .perf-line {
+        font-family: 'IBM Plex Mono', monospace;
+        font-size: 12px;
+        color: var(--muted);
+        margin-bottom: 4px;
+        word-break: break-all;
+    }
+</style>
+</head>
+<body>
+<header>
+    <p class="org"><img src="../../web/apple-touch-icon.png" alt="II">idle intelligence</p>
+    <h1>t0-web compare</h1>
+    <p class="tagline">
+        The Forecasting Company (TFC) t0-alpha ONNX INT8 export, run by onnxruntime-web
+        (WebGPU with wasm fallback), next to the idle intelligence (II) t0-fast engine
+        on GGUF weights (Q8_0/Q4_0), both loaded live in this tab.
+        Be advised: a run downloads both models it compares, about 270 MB. Turning on
+        the F32 reference below adds the never-quantized weights, about 680 MB total.
+    </p>
+    <p class="repo">
+        <a href="https://github.com/idle-intelligence/t0-web">github.com/idle-intelligence/t0-web</a>
+    </p>
+</header>
+
+<section>
+    <h2>settings <span class="sub">· run</span></h2>
+    <label>context / horizon</label>
+    <div class="model-selector" id="chChoices"></div>
+    <label>II quantization</label>
+    <div class="model-selector" id="quantChoices"></div>
+    <label>series</label>
+    <div class="model-selector" id="seriesChoices"></div>
+    <label id="pasteLabel" style="display:none">one number per line (last N = context used)</label>
+    <textarea id="pasteArea" style="display:none" placeholder="12345&#10;12401&#10;..."></textarea>
+    <div class="model-selector">
+        <label><input type="checkbox" id="f32Opt">F32 reference (407 MB download)</label>
+    </div>
+    <button class="primary" id="runBtn" type="button">run</button>
+</section>
+
+<section>
+    <h2>status</h2>
+    <div class="status">
+        <span class="status-dot" id="statusDot"></span>
+        <span id="statusText">Initializing...</span>
+    </div>
+</section>
+
+<section>
+    <h2>output <span class="sub">· forecasts</span></h2>
+    <canvas id="overlayChart" class="io-chart"></canvas>
+    <div class="legend">
+        <span><span class="swatch-line swatch-tfc"></span>TFC (median, Q10-Q90)</span>
+        <span><span class="swatch-line swatch-ii"></span>II (median, Q10-Q90)</span>
+    </div>
+</section>
+
+<section>
+    <h2>output <span class="sub">· latency</span></h2>
+    <table id="latencyTable">
+        <thead>
+            <tr><th>engine</th><th>ep/backend</th><th>download MB</th><th>cold ms</th><th>warm median ms</th><th>warm p90 ms</th></tr>
+        </thead>
+        <tbody></tbody>
+    </table>
+</section>
+
+<section>
+    <h2>output <span class="sub">· batch 24</span></h2>
+    <table id="batchTable">
+        <thead>
+            <tr><th>engine</th><th>ms total</th><th>ms/signal</th><th>note</th></tr>
+        </thead>
+        <tbody></tbody>
+    </table>
+</section>
+
+<section>
+    <h2>output <span class="sub">· agreement</span></h2>
+    <p id="agreeNote" class="perf-line"></p>
+    <table id="agreeTable">
+        <thead>
+            <tr><th>quantile</th><th>comparison</th><th>max-abs diff</th><th>max-abs % range</th><th>mean-abs diff</th><th>mean-abs % range</th></tr>
+        </thead>
+        <tbody></tbody>
+    </table>
+</section>
+
+<footer>
+    <a href="https://idleintelligence.org">idleintelligence.org</a>
+    <p class="credit">t0-alpha is by <a href="https://huggingface.co/theforecastingcompany">The Forecasting Company</a> (Apache-2.0).</p>
+</footer>
+
+<script type="module" src="./compare.js"></script>
+</body>
+</html>
