@@ -25,7 +25,7 @@ const LOCAL_MODELS_DIR = '';
 
 // Version tag on the engine URLs: browsers cache the wasm at a fixed path
 // across rebuilds, even through a hard reload. Bump when the engine changes.
-const ENGINE_BUILD = '2026-09-21';
+const ENGINE_BUILD = '2026-09-22';
 
 // The four released weights. Each Hugging Face repo holds one GGUF plus its
 // config.json (the source of that model's quantile levels).
