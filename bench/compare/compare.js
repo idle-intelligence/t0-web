@@ -337,7 +337,7 @@ function renderLatencyTable(rows) {
     tbody.innerHTML = '';
     for (const r of rows) {
         const tr = document.createElement('tr');
-        tr.innerHTML = `<td>${r.engine}</td><td>${r.ep}</td><td>${r.downloadMB.toFixed(1)}</td><td>${r.cold.toFixed(1)}</td><td>${r.warmMedian.toFixed(1)}</td><td>${r.warmP90.toFixed(1)}</td>`;
+        tr.innerHTML = `<td>${r.engine}</td><td>${r.ep}</td><td>${r.downloadMB.toFixed(1)}</td><td>${r.setup.toFixed(1)}</td><td>${r.cold.toFixed(1)}</td><td>${r.warmMedian.toFixed(1)}</td><td>${r.warmP90.toFixed(1)}</td>`;
         tbody.appendChild(tr);
     }
 }
@@ -489,9 +489,9 @@ async function run(overrideConfig) {
 
         // One untimed forecast per engine absorbs pipeline and kernel setup,
         // which is a property of the runtime, not of the model.
-        setStatus('generating', 'preparing both engines...');
-        await onnxRun(theirs.session, [context], cfg.context, cfg.horizon);
-        await oursRun(ours.model, context, cfg.horizon);
+        setStatus('generating', 'first forecast on each engine, with setup...');
+        const theirsSetup = await onnxRun(theirs.session, [context], cfg.context, cfg.horizon);
+        const oursSetup = await oursRun(ours.model, context, cfg.horizon);
 
         // Isolated call: one forecast after the GPU has sat idle for two
         // seconds, measured the same way on both engines.
@@ -595,12 +595,12 @@ async function run(overrideConfig) {
             {
                 engine: 'TFC (ONNX INT8)', ep: theirs.ep,
                 downloadMB: theirs.sizeBytes / 1e6,
-                cold: theirsCold.ms, warmMedian: median(theirsTimes), warmP90: p90(theirsTimes),
+                setup: theirsSetup.ms, cold: theirsCold.ms, warmMedian: median(theirsTimes), warmP90: p90(theirsTimes),
             },
             {
                 engine: `II (t0-fast ${cfg.quant})`, ep: ours.ep,
                 downloadMB: ours.sizeBytes / 1e6,
-                cold: oursCold.ms, warmMedian: median(oursTimes), warmP90: p90(oursTimes),
+                setup: oursSetup.ms, cold: oursCold.ms, warmMedian: median(oursTimes), warmP90: p90(oursTimes),
             },
         ];
 
