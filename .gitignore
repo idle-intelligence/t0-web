@@ -3,9 +3,11 @@
 crates/t0-wasm/pkg/
 crates/t0-wasm/pkg-wgpu/
 crates/t0-wasm/pkg-fast/
+crates/t0-wasm/pkg-mt/
 web/pkg/
 web/pkg-wgpu/
 web/pkg-fast/
+web/pkg-mt/
 web/models/
 node_modules/
 __pycache__/
