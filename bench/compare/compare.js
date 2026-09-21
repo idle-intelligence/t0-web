@@ -54,6 +54,8 @@ const CH_OPTIONS = [
 const ORIGIN = 3600; // same fixture window as bench/ours, bench/onnx, web/worker.js
 const N_BATCH = 24;
 const N_WARM = 10;
+const IDLE_MS = 2000;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const QUANTILE_LEVELS = [0.10, 0.25, 0.50, 0.75, 0.90];
 const NQ = QUANTILE_LEVELS.length;
 const MEDIAN_IDX = 2; // index of 0.50 in QUANTILE_LEVELS
@@ -485,8 +487,18 @@ async function run(overrideConfig) {
             f32Model = await loadOursF32();
         }
 
-        setStatus('generating', 'first forecast on each engine...');
+        // One untimed forecast per engine absorbs pipeline and kernel setup,
+        // which is a property of the runtime, not of the model.
+        setStatus('generating', 'preparing both engines...');
+        await onnxRun(theirs.session, [context], cfg.context, cfg.horizon);
+        await oursRun(ours.model, context, cfg.horizon);
+
+        // Isolated call: one forecast after the GPU has sat idle for two
+        // seconds, measured the same way on both engines.
+        setStatus('generating', 'isolated forecast on each engine...');
+        await sleep(IDLE_MS);
         const theirsCold = await onnxRun(theirs.session, [context], cfg.context, cfg.horizon);
+        await sleep(IDLE_MS);
         const oursCold = await oursRun(ours.model, context, cfg.horizon);
 
         setStatus('generating', 'warming up both engines...');

@@ -313,10 +313,10 @@
 
 <section>
     <h2>output <span class="sub">· latency</span></h2>
-    <p class="panel-desc">First call is the first forecast after the model loads and includes shader and kernel setup; the warm median over 10 alternating forecasts is the number to compare.</p>
+    <p class="panel-desc">Isolated: one forecast after two seconds idle. Warm: median of 10 alternating forecasts. Pipeline setup is done once, untimed, before either.</p>
     <table id="latencyTable">
         <thead>
-            <tr><th>engine</th><th>ep/backend</th><th>download MB</th><th>first call ms</th><th>warm median ms</th><th>warm p90 ms</th></tr>
+            <tr><th>engine</th><th>ep/backend</th><th>download MB</th><th>isolated ms</th><th>warm median ms</th><th>warm p90 ms</th></tr>
         </thead>
         <tbody></tbody>
     </table>
