@@ -485,7 +485,7 @@ async function run(overrideConfig) {
             f32Model = await loadOursF32();
         }
 
-        setStatus('generating', 'cold calls...');
+        setStatus('generating', 'first forecast on each engine...');
         const theirsCold = await onnxRun(theirs.session, [context], cfg.context, cfg.horizon);
         const oursCold = await oursRun(ours.model, context, cfg.horizon);
 
