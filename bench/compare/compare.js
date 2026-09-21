@@ -473,15 +473,15 @@ async function run(overrideConfig) {
         const series = await loadFixtureSeries();
         const context = cfg.usePasted ? contextFromPasted(cfg.context) : series.slice(ORIGIN - cfg.context, ORIGIN);
 
-        setStatus('loading', 'loading onnxruntime-web session (theirs)...');
+        setStatus('loading', 'loading the TFC ONNX INT8 model...');
         const theirs = await loadOnnx();
 
-        setStatus('loading', 'loading t0-fast (' + cfg.quant + ', ours)...');
+        setStatus('loading', 'loading the II engine (' + cfg.quant + ')...');
         const ours = await loadOurs(cfg.quant);
 
         let f32Model = null;
         if (cfg.useF32) {
-            setStatus('loading', 'loading t0-fast F32 reference...');
+            setStatus('loading', 'loading the F32 reference (407 MB)...');
             f32Model = await loadOursF32();
         }
 
@@ -489,13 +489,13 @@ async function run(overrideConfig) {
         const theirsCold = await onnxRun(theirs.session, [context], cfg.context, cfg.horizon);
         const oursCold = await oursRun(ours.model, context, cfg.horizon);
 
-        setStatus('generating', 'warmups...');
+        setStatus('generating', 'warming up both engines...');
         for (let i = 0; i < 2; i++) {
             await onnxRun(theirs.session, [context], cfg.context, cfg.horizon);
             await oursRun(ours.model, context, cfg.horizon);
         }
 
-        setStatus('generating', `${N_WARM} alternating calls each...`);
+        setStatus('generating', `timing ${N_WARM} forecasts per engine, alternating...`);
         const theirsTimes = [], oursTimes = [];
         let theirsLast = theirsCold, oursLast = oursCold;
         for (let i = 0; i < N_WARM; i++) {
@@ -505,7 +505,7 @@ async function run(overrideConfig) {
             oursTimes.push(oursLast.ms);
         }
 
-        setStatus('generating', 'batch 24...');
+        setStatus('generating', 'batch of 24 signals...');
         const batchRows = [];
         const rows = cfg.usePasted ? Array.from({ length: N_BATCH }, () => context) : shiftedContexts(series, cfg.context, N_BATCH, ORIGIN);
         const batchNote = cfg.usePasted ? 'same window x24 (no history to shift)' : '24 distinct shifted windows (stride 1 day)';
@@ -536,7 +536,7 @@ async function run(overrideConfig) {
             // [-1, 1]) and falsely failed real-world thousands-magnitude
             // data (see docs/runs/2026-09-20-compare-page.md): the same
             // 0.001953125 absolute diff is ~1e-6 relative there.
-            setStatus('generating', 'batch-rows parity check...');
+            setStatus('generating', 'checking the batch path against single forecasts...');
             const perRow = cfg.horizon * NQ;
             let maxAbs = 0;
             let rpLo = Infinity, rpHi = -Infinity;
@@ -599,7 +599,7 @@ async function run(overrideConfig) {
 
         const gpuInfo = await gpuAdapterName();
 
-        setStatus('ready', `done: context=${cfg.context} horizon=${cfg.horizon} quant=${cfg.quant}`);
+        setStatus('ready', `done, context ${cfg.context}, horizon ${cfg.horizon}, ${cfg.quant}`);
 
         const result = { config: cfg, latencyRows, batchRows, agreement, rowParityMaxAbs, rowParityRange, rowParityRelative, gpuInfo, ua: navigator.userAgent, timestamp: new Date().toISOString() };
         state.lastResult = result;
@@ -611,7 +611,7 @@ async function run(overrideConfig) {
         // "X is not a function" TypeError -- surface that as an actionable
         // status instead of the confusing raw message.
         if (e instanceof TypeError && /is not a function/.test(msg)) {
-            setStatus('loading', 'rebuilding engine...');
+            setStatus('loading', 'reloading the II engine...');
         } else {
             setStatus('error', 'error: ' + msg);
         }
