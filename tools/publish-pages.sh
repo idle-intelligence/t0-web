@@ -12,6 +12,11 @@
 #               (Burn CPU backend)
 # Both are published so every browser gets a working path.
 #
+# Also publishes bench/compare/index.html and bench/compare/compare.js
+# (only those two files -- that page loads its models from Hugging Face
+# and its onnxruntime-web build from jsdelivr, never from gitignored
+# bench/onnx or bench/ours).
+#
 # Never checks out gh-pages in the main working tree; never pushes.
 set -euo pipefail
 
@@ -41,9 +46,11 @@ for d in "$FAST_SRC" "$CPU_SRC"; do
     fi
 done
 
-echo "==> Exporting committed HEAD's web/ into $EXPORT_DIR"
+echo "==> Exporting committed HEAD's web/ and bench/compare/ into $EXPORT_DIR"
 mkdir -p "$EXPORT_DIR"
 git archive HEAD web | tar -x -C "$EXPORT_DIR"
+mkdir -p "$EXPORT_DIR/bench/compare"
+git archive HEAD -- bench/compare/index.html bench/compare/compare.js | tar -x -C "$EXPORT_DIR"
 
 place() { # src dir, dest dir
     rm -rf "$2"; mkdir -p "$2"
@@ -73,6 +80,8 @@ fi
 
 find "$WORKTREE_DIR" -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
 cp -R "$EXPORT_DIR/web" "$WORKTREE_DIR/web"
+mkdir -p "$WORKTREE_DIR/bench/compare"
+cp "$EXPORT_DIR/bench/compare/index.html" "$EXPORT_DIR/bench/compare/compare.js" "$WORKTREE_DIR/bench/compare/"
 
 cd "$WORKTREE_DIR"
 git add -A
