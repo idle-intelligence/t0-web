@@ -28,6 +28,7 @@ const url = args.url || 'http://127.0.0.1:8046/bench/compare/';
 const context = args.context ? parseInt(args.context, 10) : 512;
 const horizon = args.horizon ? parseInt(args.horizon, 10) : 32;
 const quant = args.quant || 'q8_0';
+const useF32 = !!args.f32;
 const screenshot = args.screenshot || null;
 const EXECUTABLE_PATH =
   process.env.CHROMIUM_PATH ||
@@ -38,12 +39,12 @@ const page = await browser.newPage();
 page.on('console', (msg) => console.log('[page]', msg.text()));
 page.on('pageerror', (err) => console.error('[pageerror]', err.message));
 
-console.log('Loading', url, { context, horizon, quant });
+console.log('Loading', url, { context, horizon, quant, useF32 });
 await page.goto(url, { waitUntil: 'load' });
 console.log('running compare protocol (loads two models, may take a while)...');
 const result = await page.evaluate(
-  ([context, horizon, quant]) => window.__app.run({ context, horizon, quant }),
-  [context, horizon, quant],
+  ([context, horizon, quant, useF32]) => window.__app.run({ context, horizon, quant, useF32 }),
+  [context, horizon, quant, useF32],
 );
 console.log(JSON.stringify(result, null, 2));
 
@@ -63,7 +64,8 @@ for (const row of result.batchRows) {
   if (row.error) problems.push(`batch ${row.engine}: ${row.error}`);
   else if (!Number.isFinite(row.msTotal) || !Number.isFinite(row.msPerSignal)) problems.push(`batch ${row.engine} not finite`);
 }
-for (const key of ['oursVsF32', 'theirsVsF32', 'theirsVsOurs']) {
+const agreeKeys = useF32 ? ['oursVsF32', 'theirsVsF32', 'theirsVsOurs'] : ['theirsVsOurs'];
+for (const key of agreeKeys) {
   const pct = result.agreement[key].overall.maxAbsPct;
   if (!Number.isFinite(pct)) problems.push(`agreement.${key}.overall.maxAbsPct not finite`);
 }
@@ -84,10 +86,13 @@ if (problems.length) {
   await browser.close();
   process.exit(1);
 }
+const extra = useF32
+  ? [', ours-vs-F32 max-abs', result.agreement.oursVsF32.overall.maxAbs.toExponential(3)]
+  : [', F32 reference opt-in was off'];
 console.log(
   'GATE PASSED: all rows finite, agreement theirsVsOurs max-abs',
-  theirsVsOursPct.toFixed(3) + '% of range < 1%, ours-vs-F32 max-abs',
-  result.agreement.oursVsF32.overall.maxAbs.toExponential(3),
+  theirsVsOursPct.toFixed(3) + '% of range < 1%',
+  ...extra,
   ', forecastBatchRows parity max-abs',
   result.rowParityMaxAbs.toExponential(3),
   '/ range',
