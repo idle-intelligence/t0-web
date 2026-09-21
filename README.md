@@ -11,7 +11,7 @@ t0-alpha and t0-beta, The Forecasting Company's time-series foundation models, r
 ## Status
 
 - F32 port matches the PyTorch reference to 1.2e-6 max-abs error (alpha) and 3.2e-6 (beta), native and browser.
-- Full GIFT-Eval protocol, 97 configs, normalized to Seasonal Naive: Q4_0 scores MASE 0.7334 / CRPS 0.4973, against our F32 control at 0.7255 / 0.4942 and the published t0-alpha card at 0.7240 / 0.4941 (`docs/runs/2026-09-20-official-protocol-full97-normalized.md`).
+- Full GIFT-Eval protocol, 97 configs, normalized to Seasonal Naive: Q8_0 scores MASE 0.7258 / CRPS 0.4943 and Q4_0 0.7334 / 0.4973, against our F32 control at 0.7255 / 0.4942 and the published t0-alpha card at 0.7240 / 0.4941 (`docs/runs/2026-09-20-official-protocol-full97-normalized.md`).
 - Quantized weights on Hugging Face: [alpha Q4_0](https://huggingface.co/idle-intelligence/t0-alpha-q4_0-webgpu) · [alpha Q8_0](https://huggingface.co/idle-intelligence/t0-alpha-q8_0-webgpu) · [beta Q4_0](https://huggingface.co/idle-intelligence/t0-beta-q4_0-webgpu) · [beta Q8_0](https://huggingface.co/idle-intelligence/t0-beta-q8_0-webgpu).
 - Architecture research in `docs/reports/t0-alpha.md` and `docs/reports/t0-alpha-anatomy.md`.
 
