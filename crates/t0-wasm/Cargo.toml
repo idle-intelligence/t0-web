@@ -17,6 +17,10 @@ wgpu = ["burn-wgpu"]
 # other is selected), same one-feature-per-wasm-pack-build convention as
 # ndarray/wgpu.
 fast = ["dep:t0-fast"]
+# Multithreaded ndarray backend (rayon over web workers via
+# wasm-bindgen-rayon). Feasibility spike only -- see docs/runs -- not yet
+# wired into web/.
+threads = ["ndarray", "burn-ndarray/multi-threads", "dep:wasm-bindgen-rayon"]
 
 [dependencies]
 t0-core = { path = "../t0-core" }
@@ -29,6 +33,7 @@ burn-wgpu = { workspace = true, optional = true }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 console_error_panic_hook = "0.1"
+wasm-bindgen-rayon = { version = "1.3", optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.3", features = ["wasm_js"] }
