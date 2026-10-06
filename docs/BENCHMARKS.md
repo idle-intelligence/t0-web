@@ -7,7 +7,7 @@ Data only — analysis and strategy go in `docs/runs/`.
 - Machine: Apple M2 (Darwin 25.3.0), no GPU job running concurrently.
 - Commit: (this milestone's HEAD — see `git log`).
 - Reference: `tfc-t0` (PyPI) `t0.model.model.T0Forecaster`, checkpoint `theforecastingcompany/t0-alpha`.
-- Command: `cargo run -p t0-cli --release -- parity --fixtures fixtures --weights ~/Code/idle-intelligence/models/hf/theforecastingcompany/t0-alpha/model.safetensors --config ~/Code/idle-intelligence/models/hf/theforecastingcompany/t0-alpha/config.json`
+- Command: `cargo run -p t0-cli --release -- parity --fixtures fixtures --weights $MODELS_DIR/hf/theforecastingcompany/t0-alpha/model.safetensors --config $MODELS_DIR/hf/theforecastingcompany/t0-alpha/config.json`
 - Fixtures: `tools/make_fixtures.py`, context 512, horizon 96, quantile levels `[0.1, 0.25, 0.5, 0.75, 0.9]` (== trained levels, no interpolation).
 
 | case | quantile max-abs err | quantile max-rel err | patch-embedding max-abs err | layer-0-output max-abs err |
@@ -341,7 +341,7 @@ Analysis and exact commands: `docs/runs/2026-09-20-head-to-head.md`.
 
 - Machine: Apple M2 (Darwin 25.3.0), `ndarray` (CPU) backend throughout (native cargo build + Python reference, no GPU job).
 - Commit: `a6b7b08` + this doc's commit.
-- Checkpoint: `theforecastingcompany/t0-beta` (HF, Apache-2.0, not gated), `hf download` into `~/Code/idle-intelligence/models/hf/theforecastingcompany/t0-beta` (config.json 478 bytes, `model.safetensors` 1,022,492,908 bytes / 1022.5 MB). Config vs t0-alpha: `embed_dim` 1024 (alpha 512), `scaler_eps` 0.01 + `scaler_eps_mode` "std_clamp" (alpha's defaults: 0.1 / "variance_offset"), `quantile_levels` 21 levels 0.01..0.99 (alpha: 5, 0.1..0.9); `num_layers` 24, `group_every_n` 3, `num_heads` 8, `mlp_hidden_dim` 2048, `patch_size` 32 — identical to alpha. No new ops: every differing field (`embed_dim`, `scaler_eps`, `scaler_eps_mode`, `quantile_levels`) is already a config-driven path in `crates/t0-core` (`config.rs`, `scaler.rs` already implements both `variance_offset` and `std_clamp`), so beta is a pure weights+config swap through the same `T0Model`/`Weights`/CLI.
+- Checkpoint: `theforecastingcompany/t0-beta` (HF, Apache-2.0, not gated), `hf download` into `$MODELS_DIR/hf/theforecastingcompany/t0-beta` (config.json 478 bytes, `model.safetensors` 1,022,492,908 bytes / 1022.5 MB). Config vs t0-alpha: `embed_dim` 1024 (alpha 512), `scaler_eps` 0.01 + `scaler_eps_mode` "std_clamp" (alpha's defaults: 0.1 / "variance_offset"), `quantile_levels` 21 levels 0.01..0.99 (alpha: 5, 0.1..0.9); `num_layers` 24, `group_every_n` 3, `num_heads` 8, `mlp_hidden_dim` 2048, `patch_size` 32 — identical to alpha. No new ops: every differing field (`embed_dim`, `scaler_eps`, `scaler_eps_mode`, `quantile_levels`) is already a config-driven path in `crates/t0-core` (`config.rs`, `scaler.rs` already implements both `variance_offset` and `std_clamp`), so beta is a pure weights+config swap through the same `T0Model`/`Weights`/CLI.
 
 ### Parity (native, F32, CPU/ndarray)
 

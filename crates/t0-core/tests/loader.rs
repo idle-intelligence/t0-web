@@ -1,5 +1,5 @@
 //! Loader shape checks against the real `t0-alpha` checkpoint. Needs the
-//! weights downloaded to `~/Code/idle-intelligence/models/hf/…` (see
+//! weights downloaded to `$MODELS_DIR/hf/…` (see
 //! README.md) — `#[ignore]`d with a clear reason when absent, per this
 //! repo's testing rule (no silent skips).
 
@@ -11,12 +11,12 @@ use t0_core::{T0Config, T0Model, Weights};
 type B = NdArray<f32>;
 
 fn model_dir() -> PathBuf {
-    let home = std::env::var("HOME").expect("HOME must be set");
-    PathBuf::from(home).join("Code/idle-intelligence/models/hf/theforecastingcompany/t0-alpha")
+    let models_dir = std::env::var("MODELS_DIR").unwrap_or_else(|_| "models".into());
+    PathBuf::from(models_dir).join("hf/theforecastingcompany/t0-alpha")
 }
 
 #[test]
-#[ignore = "requires the t0-alpha checkpoint; run `hf download theforecastingcompany/t0-alpha --local-dir ~/Code/idle-intelligence/models/hf/theforecastingcompany/t0-alpha` first, then `cargo test -- --ignored`"]
+#[ignore = "requires the t0-alpha checkpoint; run `hf download theforecastingcompany/t0-alpha --local-dir $MODELS_DIR/hf/theforecastingcompany/t0-alpha` (MODELS_DIR defaults to `models`) first, then `cargo test -- --ignored`"]
 fn loader_maps_every_tensor_with_the_right_shape() {
     let dir = model_dir();
     let weights_path = dir.join("model.safetensors");
