@@ -56,7 +56,7 @@ fn split_q8_blocks(bytes: &[u8], n_elements: usize) -> (Vec<u32>, Vec<f32>) {
     let n_blocks = n_elements / QK;
     let mut qs = vec![0u32; n_elements / 4];
     let mut scales = vec![0f32; n_blocks];
-    for (bi, block) in bytes.chunks_exact(2 + QK).enumerate() {
+    for (bi, block) in bytes.as_chunks::<{ 2 + QK }>().0.iter().enumerate() {
         scales[bi] = half::f16::from_le_bytes([block[0], block[1]]).to_f32();
         for j in 0..QK {
             let byte = block[2 + j] as u32;
@@ -72,7 +72,7 @@ fn split_q4_blocks(bytes: &[u8], n_elements: usize) -> (Vec<u32>, Vec<f32>) {
     let n_blocks = n_elements / QK;
     let mut qs = vec![0u32; n_blocks * 4]; // 16 bytes/block = 4 u32/block
     let mut scales = vec![0f32; n_blocks];
-    for (bi, block) in bytes.chunks_exact(2 + QK / 2).enumerate() {
+    for (bi, block) in bytes.as_chunks::<{ 2 + QK / 2 }>().0.iter().enumerate() {
         scales[bi] = half::f16::from_le_bytes([block[0], block[1]]).to_f32();
         for byte_i in 0..QK / 2 {
             let byte = block[2 + byte_i] as u32;
