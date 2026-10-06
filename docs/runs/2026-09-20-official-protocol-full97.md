@@ -1,8 +1,8 @@
-# Official-protocol full 97-config GIFT-Eval — Q4_0, on the GPU box
+# Official-protocol full 97-config GIFT-Eval — Q4_0, on the RTX 3080 machine
 
 ## Parameters
 
-- Box: a Linux desktop with an RTX 3080, their code (`gift_eval`/`gluonts`, same
+- Machine: an RTX 3080 desktop, their code (`gift_eval`/`gluonts`, same
   metric path as `tools/score_official_protocol.py` — `MASE()` +
   `MeanWeightedSumQuantileLoss()` via `gluonts.model.evaluate_model`), our
   dequantized Q4_0 weights (`t0-alpha` GGUF, `q4_0`, same export as
@@ -13,7 +13,7 @@
   (`results/full97/q4_0/timing_summary.json:context_length`), full test
   split, no window subsampling, `max_minutes=300`,
   `stopped_early: false` (`timing_summary.json`).
-- Launch: directory `results/q4_0/` created on the box at 2026-09-20
+- Launch: directory `results/q4_0/` created on the RTX 3080 machine at 2026-09-20
   17:15:30 CEST (box `ls --time-style=full-iso`). Finish: `all_results.csv`
   and `timing_summary.json` both written 2026-09-20 19:32:37 CEST (same
   listing) — wall time ≈2h17m.
@@ -22,11 +22,11 @@
   less than the 2h17m wall time above; the gap is per-config data
   loading/model setup/`gluonts` evaluation overhead not captured in the
   `elapsed_s` field, not a measurement of raw compute alone.
-- Data fetched from the box: `scp gpu-box:/path/to/t0-web/results/q4_0/{all_results.csv,timing_summary.json} results/full97/q4_0/`
+- Data fetched from the RTX 3080 machine: `scp <rtx-3080-machine>:/path/to/t0-web/results/q4_0/{all_results.csv,timing_summary.json} results/full97/q4_0/`
   (97 rows in `all_results.csv`, one per config; `results/` is not
   git-ignored in this repo, confirmed with `git check-ignore -v`, so these
   files are committed directly under `results/full97/q4_0/`).
-- F32 control: still running on the box as of this write-up. Its
+- F32 control: still running on the RTX 3080 machine as of this write-up. Its
   `results/f32/all_results.csv` was only a 305-byte header as of 19:32:38
   CEST (checked via `ls`, not fetched — box was not otherwise touched per
   instructions) — the F32 run appears to have started only once Q4_0
@@ -38,9 +38,9 @@
 | variant | MASE (agg) | CRPS (agg, `mean_weighted_sum_quantile_loss`) | configs | wall time |
 |---|---|---|---|---|
 | Q4_0 (this run) | 1.0252 | 0.1254 | 97 | 2h17m (box time), 48.5 min inference-only |
-| F32 (control) | pending | pending | 97 | running on the box, ETA ~100 min |
+| F32 (control) | pending | pending | 97 | running on the RTX 3080 machine, ETA ~100 min |
 
-Values from `results/full97/q4_0/all_results.csv`: `agg_mase = exp(mean(log(eval_metrics/MASE[0.5])))` = 1.0251565524664221, `agg_crps = exp(mean(log(eval_metrics/mean_weighted_sum_quantile_loss)))` = 0.12537503219247603, computed over all 97 rows with the same geometric-mean formula `score_official_protocol.py` uses (lines 141-145 of that script), applied directly to the box's already-computed per-config metrics rather than re-running the script (the box's `all_results.csv` already contains the same `MASE[0.5]`/`mean_weighted_sum_quantile_loss` columns the script would produce).
+Values from `results/full97/q4_0/all_results.csv`: `agg_mase = exp(mean(log(eval_metrics/MASE[0.5])))` = 1.0251565524664221, `agg_crps = exp(mean(log(eval_metrics/mean_weighted_sum_quantile_loss)))` = 0.12537503219247603, computed over all 97 rows with the same geometric-mean formula `score_official_protocol.py` uses (lines 141-145 of that script), applied directly to the RTX 3080 machine's already-computed per-config metrics rather than re-running the script (the RTX 3080 machine's `all_results.csv` already contains the same `MASE[0.5]`/`mean_weighted_sum_quantile_loss` columns the script would produce).
 
 ### Comparison to published t0-alpha GIFT-Eval numbers
 
@@ -203,9 +203,9 @@ here — e.g. `loop_seattle/5T/short` has `n_windows=6460`,
   about 1/2.8 of the observed wall time between directory creation and
   file-write completion (2h17m ≈ 8237s). No log with a full breakdown of
   the remaining time was fetched (out of scope — only the two named files
-  were pulled from the box), so the source of that gap is not established
-  here beyond "not raw inference," per the box's own `elapsed_s` field.
+  were pulled from the RTX 3080 machine), so the source of that gap is not established
+  here beyond "not raw inference," per the RTX 3080 machine's own `elapsed_s` field.
 - The F32 control's `all_results.csv` was still just a 305-byte header as
   of 19:32:38 CEST, one second after the Q4_0 files finished writing —
-  consistent with the two runs having been serialized on the box (one GPU
+  consistent with the two runs having been serialized on the RTX 3080 machine (one GPU
   job at a time) rather than run concurrently.

@@ -191,6 +191,6 @@ subsampling), unlike that other doc.
 
 Not run tonight (CPU/M2, laptop rules). `tools/fullsuite/setup_3080.sh`
 (one-time venv setup) and `tools/fullsuite/launch_3080.sh` (systemd-run,
-detached, all four variants) are prepared for the GPU box; see that
+detached, all four variants) are prepared for the RTX 3080 machine; see that
 script's header for the exact launch invocation. Neither script has been
-run against the box this session.
+run against the RTX 3080 machine this session.

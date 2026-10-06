@@ -32,7 +32,7 @@ from `cubek-matmul-0.1.1/src/launch/strategy.rs:437` (a `cubecl-wgpu` 0.9.0 depe
 
 No environment variable or public API was found in `cubek-matmul` 0.1.1 to force a smaller-tile strategy within this milestone's time budget, so this is recorded as a known limitation rather than patched into a pinned dependency mid-milestone. ndarray has no equivalent ceiling (ran n=1000 without issue). This blocks a "Forecast all 1000 signals" wgpu batch claim for GOAL.md's "beat their numbers" bar until either `cubecl`/`cubecl-wgpu` is upgraded past this bug or the matmul strategy is forced smaller.
 
-**Owner-relevant note**: 32 KiB is Metal's actual per-threadgroup shared-memory limit here, not just WebGPU's spec-level 256-invocation workgroup cap — so a future WASM+WebGPU build is likely to hit the same or a stricter ceiling in-browser, not a Metal-specific one. Worth deciding whether to chase a `cubecl`/`cubecl-wgpu` version bump now (native) or defer the fix to the WASM milestone once the same failure is reproduced in-browser.
+**Note**: 32 KiB is Metal's actual per-threadgroup shared-memory limit here, not just WebGPU's spec-level 256-invocation workgroup cap — so a future WASM+WebGPU build is likely to hit the same or a stricter ceiling in-browser, not a Metal-specific one. Worth deciding whether to chase a `cubecl`/`cubecl-wgpu` version bump now (native) or defer the fix to the WASM milestone once the same failure is reproduced in-browser.
 
 ## GPU contention
 

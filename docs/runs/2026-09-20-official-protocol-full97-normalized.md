@@ -5,9 +5,9 @@
 - Input: `results/full97/q4_0/all_results.csv` and `results/full97/f32/all_results.csv`
   (97 rows each, their code/protocol, our dequantized Q4_0 / native F32
   weights — see `docs/runs/2026-09-20-official-protocol-full97.md` for how
-  the Q4_0 run was produced; the F32 control was the box run left
+  the Q4_0 run was produced; the F32 control was the RTX 3080 machine's run left
   "running" in that doc, finished this update). F32 fetched read-only:
-  `scp gpu-box:/path/to/t0-web/results/f32/{all_results.csv,timing_summary.json} results/full97/f32/`.
+  `scp <rtx-3080-machine>:/path/to/t0-web/results/f32/{all_results.csv,timing_summary.json} results/full97/f32/`.
 - Baseline: Seasonal Naive per-config results, fetched read-only from
   `github.com/SalesforceAIResearch/gift-eval`, commit `9a014e9e8ea130ba39c100c60d5dcbab7db57ac9`,
   `results/seasonal_naive/all_results.csv` (`git clone --depth 1` into
@@ -27,7 +27,7 @@
   `"loop_seattle/5T/short"`) — **0 unmatched configs**, no naming
   reconciliation was needed for this run.
 - Tool: `tools/score_official_protocol.py` gained `--results-csv` (score an
-  already-computed `all_results.csv` directly, since the box run's
+  already-computed `all_results.csv` directly, since the RTX 3080 machine's run's
   manifest/forecast files were regenerable `/tmp` data, not committed — see
   below) and `--normalize-by <seasonal_naive_csv>` (this normalization,
   with the unmatched-key check above built in and failing loudly on any
@@ -55,7 +55,7 @@ once/if a full-97 Q8_0 box run exists.)
 |---|---|---|---|
 | Published card (t0-alpha, F32) | 0.7240 | 0.4941 | — (`theforecastingcompany/t0-alpha` README lines 319-320) |
 | Our F32 (this run, box, their code/protocol) | 0.7255 | 0.4942 | **+0.2% MASE, +0.02% CRPS** |
-| Our Q8_0 (full-97) | not available | not available | full-97 Q8_0 was never run on the box this session; only the 8-config subset exists (raw, non-normalizable — see below) |
+| Our Q8_0 (full-97) | not available | not available | full-97 Q8_0 was never run on the RTX 3080 machine this session; only the 8-config subset exists (raw, non-normalizable — see below) |
 | Our Q4_0 (this run, box) | 0.7334 | 0.4973 | +1.3% MASE, +0.6% CRPS |
 
 **Gate 1 — does our F32 pipeline reproduce the card:** yes. 0.7255 vs

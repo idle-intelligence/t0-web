@@ -316,7 +316,7 @@ into this repo at `results/seasonal_naive/all_results.csv`; tool:
 |---|---|---|---|
 | Published card (t0-alpha, F32) | 0.7240 | 0.4941 | — (`theforecastingcompany/t0-alpha` `README.md` lines 319-320) |
 | Our F32 (full-97, box) | 0.7255 | 0.4942 | +0.2% MASE, +0.02% CRPS |
-| Our Q8_0 (full-97) | not available | not available | full-97 Q8_0 was never run on the box; only a non-normalizable 8-config-subset aggregate exists |
+| Our Q8_0 (full-97) | not available | not available | full-97 Q8_0 was never run on the RTX 3080 machine; only a non-normalizable 8-config-subset aggregate exists |
 | Our Q4_0 (full-97, box) | 0.7334 | 0.4973 | +1.3% MASE, +0.6% CRPS |
 
 **Gate 1 (pipeline fidelity): our F32 reproduces the card** to within
