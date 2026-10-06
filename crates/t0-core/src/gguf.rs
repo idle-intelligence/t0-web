@@ -100,7 +100,7 @@ pub fn int8_per_channel_roundtrip(x: &[f32], rows: usize, cols: usize) -> Vec<f3
 pub fn quantize_q8_0(x: &[f32]) -> Vec<u8> {
     assert_eq!(x.len() % QK, 0);
     let mut out = Vec::with_capacity((x.len() / QK) * (2 + QK));
-    for block in x.chunks_exact(QK) {
+    for block in x.as_chunks::<QK>().0 {
         let amax = block.iter().fold(0.0f32, |a, &v| a.max(v.abs()));
         let d = amax / 127.0;
         let id = if d != 0.0 { 1.0 / d } else { 0.0 };
@@ -116,7 +116,7 @@ pub fn quantize_q8_0(x: &[f32]) -> Vec<u8> {
 pub fn dequantize_q8_0(bytes: &[u8], n_elements: usize) -> Vec<f32> {
     assert_eq!(n_elements % QK, 0);
     let mut out = Vec::with_capacity(n_elements);
-    for block in bytes.chunks_exact(2 + QK) {
+    for block in bytes.as_chunks::<{ 2 + QK }>().0 {
         let d = f16::from_le_bytes([block[0], block[1]]).to_f32();
         for &b in &block[2..2 + QK] {
             out.push(d * (b as i8) as f32);
@@ -133,7 +133,7 @@ pub fn dequantize_q8_0(bytes: &[u8], n_elements: usize) -> Vec<f32> {
 pub fn quantize_q4_0(x: &[f32]) -> Vec<u8> {
     assert_eq!(x.len() % QK, 0);
     let mut out = Vec::with_capacity((x.len() / QK) * (2 + QK / 2));
-    for block in x.chunks_exact(QK) {
+    for block in x.as_chunks::<QK>().0 {
         let mut amax = 0.0f32;
         let mut max = 0.0f32;
         for &v in block {
@@ -159,7 +159,7 @@ pub fn quantize_q4_0(x: &[f32]) -> Vec<u8> {
 pub fn dequantize_q4_0(bytes: &[u8], n_elements: usize) -> Vec<f32> {
     assert_eq!(n_elements % QK, 0);
     let mut out = vec![0.0f32; n_elements];
-    for (b, block) in bytes.chunks_exact(2 + QK / 2).enumerate() {
+    for (b, block) in bytes.as_chunks::<{ 2 + QK / 2 }>().0.iter().enumerate() {
         let d = f16::from_le_bytes([block[0], block[1]]).to_f32();
         let base = b * QK;
         for j in 0..QK / 2 {
@@ -213,11 +213,11 @@ pub fn quantize_for(ty: GgmlType, values: &[f32]) -> Vec<u8> {
 pub fn dequantize_for(ty: GgmlType, bytes: &[u8], n_elements: usize) -> Vec<f32> {
     match ty {
         GgmlType::F32 => bytes
-            .chunks_exact(4)
+            .as_chunks::<4>().0.iter()
             .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
             .collect(),
         GgmlType::F16 => bytes
-            .chunks_exact(2)
+            .as_chunks::<2>().0.iter()
             .map(|b| f16::from_le_bytes([b[0], b[1]]).to_f32())
             .collect(),
         GgmlType::Q8_0 => dequantize_q8_0(bytes, n_elements),

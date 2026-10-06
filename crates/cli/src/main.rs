@@ -100,7 +100,7 @@ struct LongCase {
 
 fn read_f32(path: &Path) -> Result<Vec<f32>> {
     let bytes = std::fs::read(path).with_context(|| format!("reading {}", path.display()))?;
-    Ok(bytes.chunks_exact(4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect())
+    Ok(bytes.as_chunks::<4>().0.iter().map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect())
 }
 
 fn max_abs_err(a: &[f32], b: &[f32]) -> (f32, f32) {
