@@ -1,5 +1,6 @@
 /target
 /.venv
+/_site
 crates/t0-wasm/pkg/
 crates/t0-wasm/pkg-wgpu/
 crates/t0-wasm/pkg-fast/

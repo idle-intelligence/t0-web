@@ -108,7 +108,7 @@ t0-cli bench --weights t0-alpha-q4_0.gguf --backend ndarray --signals 1000 --con
 
 ## Publishing the demo
 
-`tools/publish-pages.sh` builds both wasm engines (`fast` for WebGPU at `web/pkg-wgpu`, `ndarray` for CPU at `web/pkg`) and republishes committed HEAD's `web/` to an orphan `gh-pages` branch, following `../tts-web`'s layout (repo root = the served tree). It also copies `bench/compare/index.html` and `bench/compare/compare.js` (no assets: that page loads everything from Hugging Face and jsdelivr). Run it, then `git push origin gh-pages --force-with-lease`. GitHub Pages source: branch `gh-pages`, folder `/`.
+`scripts/build.sh` builds both wasm engines (`fast` for WebGPU at `web/pkg-wgpu`, `ndarray` for CPU at `web/pkg`) and assembles `_site/` with `web/` plus `bench/compare/index.html` and `bench/compare/compare.js` (no other assets: that page loads everything from Hugging Face and jsdelivr). `scripts/serve.py` serves `_site/` locally. The `pages` GitHub Actions workflow runs the same build on push to `main` and deploys `_site/` to GitHub Pages.
 
 ## What's not done yet
 
