@@ -144,7 +144,7 @@ def run_reference(manifest):
 
     t0_alpha_dir = os.environ.get(
         "T0_ALPHA_DIR",
-        os.path.expanduser("~/Code/idle-intelligence/models/hf/theforecastingcompany/t0-alpha"),
+        os.path.join(os.environ.get("MODELS_DIR", "models"), "hf/theforecastingcompany/t0-alpha"),
     )
     model = T0Forecaster.from_pretrained(t0_alpha_dir).to("cpu").eval()
 

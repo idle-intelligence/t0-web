@@ -1,10 +1,7 @@
-"""Same official-protocol GIFT-Eval subset as
-`.claude/worktrees/fullsuite/tools/fullsuite/run_gifteval.py`, adapted for
-t0-beta. That script is hardcoded to t0-alpha (T0_ALPHA_DIR, ONNX_PATH,
-`t0-alpha-{variant}.gguf` naming) and lives in a different worktree that
-this task must not edit (repo rule: never edit another worktree from this
-one), so this is a beta-scoped copy rather than a `--model` flag added
-in place. Same "their code, their protocol": `gift_eval.data.Dataset`
+"""Same official-protocol GIFT-Eval subset as the full-suite run's
+`run_gifteval.py`, adapted for t0-beta. That script is hardcoded to
+t0-alpha (T0_ALPHA_DIR, ONNX_PATH, `t0-alpha-{variant}.gguf` naming), so
+this is a beta-scoped copy rather than a `--model` flag added in place. Same "their code, their protocol": `gift_eval.data.Dataset`
 windowing, `gluonts.model.evaluate_model` + their metrics,
 `t0.evaluation.T0Predictor` verbatim, full CONTEXT_LENGTH=8192, no window
 subsampling. Only the weights/variant plumbing differs (t0-beta dir,
@@ -41,7 +38,7 @@ load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 T0_BETA_DIR = os.environ.get(
     "T0_BETA_DIR",
-    os.path.expanduser("~/Code/idle-intelligence/models/hf/theforecastingcompany/t0-beta"),
+    os.path.join(os.environ.get("MODELS_DIR", "models"), "hf/theforecastingcompany/t0-beta"),
 )
 GGUF_DIR = os.path.join(ROOT, "fixtures", "beta", "gguf")
 

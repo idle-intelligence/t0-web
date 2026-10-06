@@ -24,10 +24,10 @@ fn synthetic_sines(n_signals: usize, t_ctx: usize) -> Vec<f32> {
 }
 
 #[test]
-#[ignore = "requires the t0-alpha checkpoint; run `hf download theforecastingcompany/t0-alpha --local-dir ~/Code/idle-intelligence/models/hf/theforecastingcompany/t0-alpha` first, then `cargo test -p t0-cli --release -- --ignored batch_async`"]
+#[ignore = "requires the t0-alpha checkpoint; run `hf download theforecastingcompany/t0-alpha --local-dir $MODELS_DIR/hf/theforecastingcompany/t0-alpha` (MODELS_DIR defaults to `models`) first, then `cargo test -p t0-cli --release -- --ignored batch_async`"]
 fn async_chunked_batch_matches_sync_chunked_batch() {
-    let home = std::env::var("HOME").unwrap();
-    let model_dir = PathBuf::from(home).join("Code/idle-intelligence/models/hf/theforecastingcompany/t0-alpha");
+    let models_dir = std::env::var("MODELS_DIR").unwrap_or_else(|_| "models".into());
+    let model_dir = PathBuf::from(models_dir).join("hf/theforecastingcompany/t0-alpha");
     assert!(model_dir.join("model.safetensors").exists(), "{} not found — see the #[ignore] reason above", model_dir.display());
 
     let config: T0Config = serde_json::from_str(&std::fs::read_to_string(model_dir.join("config.json")).unwrap()).unwrap();

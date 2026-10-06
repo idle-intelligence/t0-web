@@ -46,7 +46,7 @@ code" apart from the substituted weights in (c)/(d).
   unchanged from `docs/reports/t0-published-numbers.md`),
   `theforecastingcompany/t0-alpha-onnx-int8` (`t0-alpha-grouped-int8.onnx`,
   sha256 `82da4392...`, downloaded this session to
-  `~/Code/idle-intelligence/models/hf/theforecastingcompany/t0-alpha-onnx-int8/`).
+  `$MODELS_DIR/hf/theforecastingcompany/t0-alpha-onnx-int8/`).
 - Our GGUF exports: `t0-cli export-gguf --quant q8_0|q4_0` (binary built at
   the main checkout, commit `4404b6f`, invoked read-only from this worktree),
   written to `tools/fullsuite/weights/t0-alpha-{q8_0,q4_0}.gguf`.

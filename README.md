@@ -54,13 +54,13 @@ Python is used here only because the reference implementation is itself PyTorch 
 
 ## Parity gate
 
-Needs the t0-alpha checkpoint (not committed; weights are never committed):
+Needs the t0-alpha checkpoint (not committed; weights are never committed). `$MODELS_DIR` below is wherever you keep downloaded Hugging Face checkpoints (defaults to `models` under the repo if unset):
 ```
-hf download theforecastingcompany/t0-alpha --local-dir ~/Code/idle-intelligence/models/hf/theforecastingcompany/t0-alpha
+hf download theforecastingcompany/t0-alpha --local-dir $MODELS_DIR/hf/theforecastingcompany/t0-alpha
 cargo run -p t0-cli --release -- parity \
   --fixtures fixtures \
-  --weights ~/Code/idle-intelligence/models/hf/theforecastingcompany/t0-alpha/model.safetensors \
-  --config ~/Code/idle-intelligence/models/hf/theforecastingcompany/t0-alpha/config.json
+  --weights $MODELS_DIR/hf/theforecastingcompany/t0-alpha/model.safetensors \
+  --config $MODELS_DIR/hf/theforecastingcompany/t0-alpha/config.json
 ```
 Gate: quantile output within 1e-4 max-abs of the reference on every fixture. Current result: 1.2e-6 (`docs/BENCHMARKS.md`).
 

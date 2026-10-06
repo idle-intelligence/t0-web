@@ -83,20 +83,25 @@ fn q8_and_f32_models_share_engine_without_cross_contamination() {
     assert_eq!(b2, baseline_f32, "F32 model's second interleaved call diverged from its standalone baseline");
 }
 
-/// Two *different-config* GGUF models (t0-alpha, t0-beta from the beta
-/// worktree's fixtures) sharing one `Engine`: a stronger version of the
-/// same regression, since alpha/beta differ in more than quantization
-/// (different uniform struct sizes for some call sites in the beta CLI's
-/// own history, per the task brief) -- if any cache were keyed only by
-/// call-site string and shape, this is the case most likely to produce a
-/// wrong-size or wrong-buffer bind group instead of just wrong values.
-/// Skips (does not fail) if the beta worktree's fixtures aren't present,
-/// since that worktree is a separate, optional checkout.
+/// Two *different-config* GGUF models (t0-alpha, t0-beta) sharing one
+/// `Engine`: a stronger version of the same regression, since alpha/beta
+/// differ in more than quantization (different uniform struct sizes for
+/// some call sites in the beta CLI's own history, per the task brief) --
+/// if any cache were keyed only by call-site string and shape, this is
+/// the case most likely to produce a wrong-size or wrong-buffer bind
+/// group instead of just wrong values.
+/// Skips (does not fail) if the beta GGUF fixture isn't present: it's not
+/// committed (too large), so point `T0_FIXTURES_DIR` at a directory
+/// containing `beta/gguf/t0-beta-q8_0.gguf` to run this test, or drop it
+/// next to this repo's own `fixtures/` (the default).
 #[test]
-#[ignore = "requires the beta worktree's fixtures; run from repo root with `cargo test -p t0-fast --release -- --ignored pool_isolation`"]
+#[ignore = "requires the beta GGUF fixture (not committed); set T0_FIXTURES_DIR to a directory containing beta/gguf/t0-beta-q8_0.gguf, or place it under fixtures/, then run from repo root with `cargo test -p t0-fast --release -- --ignored pool_isolation`"]
 fn alpha_and_beta_models_share_engine_without_cross_contamination() {
     let alpha_path = manifest_dir().join("../../bench/ours/t0-alpha-q8_0.gguf");
-    let beta_path = manifest_dir().join("../../.claude/worktrees/beta/fixtures/beta/gguf/t0-beta-q8_0.gguf");
+    let fixtures_dir = std::env::var("T0_FIXTURES_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| manifest_dir().join("../../fixtures"));
+    let beta_path = fixtures_dir.join("beta/gguf/t0-beta-q8_0.gguf");
     if !alpha_path.exists() || !beta_path.exists() {
         eprintln!(
             "skipping: alpha fixture ({}) or beta fixture ({}) not found -- beta worktree fixtures are optional",

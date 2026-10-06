@@ -44,7 +44,7 @@ Values from `results/full97/q4_0/all_results.csv`: `agg_mase = exp(mean(log(eval
 
 ### Comparison to published t0-alpha GIFT-Eval numbers
 
-`~/Code/idle-intelligence/models/hf/theforecastingcompany/t0-alpha/README.md` lines
+`$MODELS_DIR/hf/theforecastingcompany/t0-alpha/README.md` lines
 319-320 (model card's GIFT-Eval leaderboard table):
 
 | GIFT-Eval | CRPS | 0.4941 |

@@ -9,7 +9,7 @@ used by `web/worker.js`).
 - **Immediate source**: GIFT-Eval (`Salesforce/GiftEval` on the HuggingFace
   Hub), config `us_births/D`, the same benchmark subset already used by this
   repo's GIFT-Eval scoring (`docs/runs/2026-09-19-gifteval-subset.md`). Local
-  snapshot: `~/Code/idle-intelligence/models/data/gift-eval/us_births/D/data-00000-of-00001.arrow`
+  snapshot: `$MODELS_DIR/data/gift-eval/us_births/D/data-00000-of-00001.arrow`
   (not committed here; weights and datasets are never committed).
 - **Upstream origin**: the Monash Time Series Forecasting Archive's
   `us_births` dataset (Godahewa et al. 2021, <https://forecastingdata.org/>),

@@ -22,7 +22,7 @@
   transitively (pinned pre-1.0 versions).
 - Artifact under test (theirs): `theforecastingcompany/t0-alpha-onnx-int8`,
   `t0-alpha-grouped-int8.onnx`, 107,151,882 bytes, already present at
-  `~/Code/idle-intelligence/models/hf/theforecastingcompany/t0-alpha-onnx-int8/`
+  `$MODELS_DIR/hf/theforecastingcompany/t0-alpha-onnx-int8/`
   (not re-downloaded). Single file, no external-data shard.
 - Artifacts under test (ours): `web/models/t0-alpha-q8_0.gguf`
   (108,936,047 bytes) and `/tmp/t0-alpha-q4_0.gguf` (58,604,399 bytes),
