@@ -824,7 +824,13 @@ mod tests {
     /// `k=512, n=4` weight) guards both kernel families for all three
     /// weight residencies without duplicating the setup three times.
     fn check_linear_kernel(quant: WeightQuant, m: usize) {
-        let engine = Engine::new().unwrap();
+        let engine = match Engine::new() {
+            Ok(e) => e,
+            Err(e) => {
+                eprintln!("skipped: no GPU adapter ({e})");
+                return;
+            }
+        };
         let k = 512usize;
         let n = 4usize;
         let mut w = vec![0f32; n * k];
