@@ -21,13 +21,24 @@ ENGINE_BUILD="${ENGINE_BUILD:-dev}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
+# RUSTFLAGS as an env var REPLACES .cargo/config.toml's target rustflags
+# instead of adding to it, silently dropping +simd128 and the getrandom cfg.
+# --config merges with the config file's rustflags array, so the remap flag
+# goes in through that instead.
+REMAP_CONFIG="target.wasm32-unknown-unknown.rustflags=[\"--remap-path-prefix=$HOME=/home\"]"
+
 echo "==> Building t0-wasm (fast feature, WebGPU engine) for ENGINE_BUILD=$ENGINE_BUILD"
-RUSTFLAGS="--remap-path-prefix=$HOME=/home" \
-  wasm-pack build crates/t0-wasm --target web --out-dir pkg-fast --release --no-default-features --features fast
+# No "--" before --config: wasm-pack 0.14's extra-args parser mishandles the
+# "--features <name> -- <extra>" combination (the "--" and everything after
+# it get swallowed into --features's value list), so --config never reaches
+# cargo. Passing --config straight after --features works and still reaches
+# cargo build as an extra option.
+wasm-pack build crates/t0-wasm --target web --out-dir pkg-fast --release --no-default-features --features fast \
+  --config "$REMAP_CONFIG"
 
 echo "==> Building t0-wasm (ndarray feature, CPU engine)"
-RUSTFLAGS="--remap-path-prefix=$HOME=/home" \
-  wasm-pack build crates/t0-wasm --target web --out-dir pkg --release
+wasm-pack build crates/t0-wasm --target web --out-dir pkg --release \
+  --config "$REMAP_CONFIG"
 
 FAST_WASM="crates/t0-wasm/pkg-fast/t0_wasm_bg.wasm"
 CPU_WASM="crates/t0-wasm/pkg/t0_wasm_bg.wasm"
