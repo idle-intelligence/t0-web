@@ -21,11 +21,18 @@ ENGINE_BUILD="${ENGINE_BUILD:-dev}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
-# RUSTFLAGS as an env var REPLACES .cargo/config.toml's target rustflags
-# instead of adding to it, silently dropping +simd128 and the getrandom cfg.
-# --config merges with the config file's rustflags array, so the remap flag
-# goes in through that instead.
-REMAP_CONFIG="target.wasm32-unknown-unknown.rustflags=[\"--remap-path-prefix=$HOME=/home\"]"
+# Per-target flags (+simd128, the getrandom_backend cfg) live in
+# .cargo/config.toml. Only the machine-dependent --remap-path-prefix flags
+# are passed inline, so compiled-in source paths carry no home directory.
+# They go in with --config, which merges with the config file (RUSTFLAGS
+# would replace it and drop +simd128 and the getrandom cfg). The cfg(all())
+# key puts them after any user-level cfg(all()) remap, so they win (rustc
+# applies the last matching remap); with --target they still apply only to
+# the wasm, not to host build scripts.
+# This moves to `trim-paths = "all"` in the release profile once cargo
+# stabilizes it.
+CARGO_HOME_DIR="${CARGO_HOME:-$HOME/.cargo}"
+REMAP="target.'cfg(all())'.rustflags=[\"--remap-path-prefix=$HOME=/home\", \"--remap-path-prefix=$CARGO_HOME_DIR=/cargo\"]"
 
 echo "==> Building t0-wasm (fast feature, WebGPU engine) for ENGINE_BUILD=$ENGINE_BUILD"
 # No "--" before --config: wasm-pack 0.14's extra-args parser mishandles the
@@ -34,11 +41,11 @@ echo "==> Building t0-wasm (fast feature, WebGPU engine) for ENGINE_BUILD=$ENGIN
 # cargo. Passing --config straight after --features works and still reaches
 # cargo build as an extra option.
 wasm-pack build crates/t0-wasm --target web --out-dir pkg-fast --release --no-default-features --features fast \
-  --config "$REMAP_CONFIG"
+  --config "$REMAP"
 
 echo "==> Building t0-wasm (ndarray feature, CPU engine)"
 wasm-pack build crates/t0-wasm --target web --out-dir pkg --release \
-  --config "$REMAP_CONFIG"
+  --config "$REMAP"
 
 FAST_WASM="crates/t0-wasm/pkg-fast/t0_wasm_bg.wasm"
 CPU_WASM="crates/t0-wasm/pkg/t0_wasm_bg.wasm"
@@ -88,5 +95,9 @@ if [ "$COUNT" -ne 2 ]; then
     echo "error: expected 2 ENGINE_BUILD assignments rewritten to $ENGINE_BUILD, found $COUNT" >&2
     exit 1
 fi
+
+# --- Target features: every wasm keeps SIMD ---
+echo "==> Checking wasm target features"
+python3 scripts/check_wasm_features.py "$FAST_WASM" +simd128 -- "$CPU_WASM" +simd128
 
 echo "==> Wrote _site"
