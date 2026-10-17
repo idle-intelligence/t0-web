@@ -18,3 +18,6 @@ pub use burn_impl::*;
 mod fast;
 #[cfg(feature = "fast")]
 pub use fast::*;
+
+#[cfg(feature = "threads")]
+pub use wasm_bindgen_rayon::init_thread_pool;
