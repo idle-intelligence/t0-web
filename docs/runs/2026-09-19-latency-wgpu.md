@@ -1,6 +1,6 @@
 # Single-signal native wgpu (Metal) latency, per quant
 
-- Machine: Apple M2 (Darwin 25.3.0), `wgpu` backend (`burn-wgpu`, Metal).
+- Machine: Apple M2, `wgpu` backend (`burn-wgpu`, Metal).
   No other GPU job ran during the whole run covered by this doc, and no
   other local `cargo`/`rustc` build was running while these numbers were
   taken.

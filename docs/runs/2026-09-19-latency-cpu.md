@@ -1,6 +1,6 @@
 # Single-signal native CPU latency, per quant
 
-- Machine: Apple M2 (Darwin 25.3.0), 8 threads available (`std::thread::available_parallelism`).
+- Machine: Apple M2, 8 threads available (`std::thread::available_parallelism`).
 - Commit: `01257dc` (`cli: add --warmup flag to bench`).
 - GPU: occupied by another training job throughout this run, so no
   wgpu/Metal/WebGPU measurement was taken; ndarray (CPU) backend only.

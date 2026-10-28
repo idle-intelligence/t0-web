@@ -1,6 +1,6 @@
 # Official-protocol subset — our `t0-fast` engine, same 8 configs
 
-Machine: Apple M2 (Darwin 25.3.0), native Metal (`wgpu`), CPU data
+Machine: Apple M2, native Metal (`wgpu`), CPU data
 loading + GPU forward via `crates/t0-fast`. Commits: `4979e48` (rollout
 underflow fix), `fdca2a8` (`cmd_gifteval_fast` safetensors+`fast_quant`
 support), `f2cf870` (bind-group cache key fix) — see

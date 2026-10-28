@@ -15,7 +15,7 @@ per-row parity check, and a three-way median/Q10-Q90 agreement diff
 (theirs-vs-ours, ours-vs-F32, theirs-vs-F32). Fixture series (`us_births`,
 same as `bench/onnx`/`bench/ours`), context/horizon 512/32, ours at Q8_0.
 
-- Machine: Apple M2 (Darwin 25.3.0), under thermal load: **no
+- Machine: Apple M2, under thermal load: **no
   latency numbers from this run**; only the timing-independent
   correctness numbers below were captured. Latency/batch ms rerun is
   pending a cold machine.

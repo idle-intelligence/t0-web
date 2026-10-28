@@ -1,6 +1,6 @@
 # t0-fast batch GEMM: two register-blocking attempts, both reverted
 
-Machine: Apple M2 (Darwin 25.3.0). Native via `t0-cli bench --backend fast`
+Machine: Apple M2. Native via `t0-cli bench --backend fast`
 (Metal/wgpu-native). GPU-contention rule checked before every timing run
 (`pgrep -f 'Chrome for Testing'`, plus a check for any other GPU job,
 see "contention note" below). Fixture: `us_births`-equivalent bench window (context 512, horizon

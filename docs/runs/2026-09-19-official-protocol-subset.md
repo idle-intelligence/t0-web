@@ -1,6 +1,6 @@
 # Official-protocol subset — their code, their protocol, our quants
 
-Machine: Apple M2 (Darwin 25.3.0), CPU only (no MPS/GPU). Commit: `4404b6f`.
+Machine: Apple M2, CPU only (no MPS/GPU). Commit: `4404b6f`.
 
 This run answers a different question than
 `docs/runs/2026-09-19-gifteval-subset.md`: that run compares OUR Burn/wgpu
