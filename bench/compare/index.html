@@ -270,8 +270,9 @@
         The Forecasting Company (TFC) t0-alpha ONNX INT8 export, run by onnxruntime-web
         (WebGPU with wasm fallback), next to the idle intelligence (II) t0-fast engine
         on GGUF weights (Q8_0/Q4_0), both loaded live in this tab.
-        Be advised: a run downloads both models it compares, about 270 MB. Turning on
-        the F32 reference below adds the never-quantized weights, about 680 MB total.
+        A run downloads one ONNX file and one GGUF: about 210 MB with Q8_0, 160 MB
+        with Q4_0. Turning on the F32 reference below adds the never-quantized
+        weights, 407 MB more.
     </p>
     <p class="repo">
         <a href="https://github.com/idle-intelligence/t0-web">github.com/idle-intelligence/t0-web</a>

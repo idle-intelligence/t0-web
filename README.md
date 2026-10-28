@@ -4,7 +4,7 @@ t0-alpha and t0-beta, The Forecasting Company's time-series foundation models, r
 
 [**Try the demo →**](https://idle-intelligence.github.io/t0-web/web/)
 
-[**Try the compare page →**](https://idle-intelligence.github.io/t0-web/bench/compare/): the same engine next to the official ONNX INT8 export and, opt-in, an F32 reference, side by side in one tab (see `docs/runs/2026-09-20-compare-page.md`). Be advised: a run downloads both models it compares, about 270 MB; turning on the F32 reference adds about 410 MB more, for about 680 MB total.
+[**Try the compare page →**](https://idle-intelligence.github.io/t0-web/bench/compare/): the same engine next to the official ONNX INT8 export and, opt-in, an F32 reference, side by side in one tab (see `docs/runs/2026-09-20-compare-page.md`). A run downloads one ONNX file and one GGUF: about 210 MB with Q8_0, 160 MB with Q4_0; turning on the F32 reference adds 407 MB more.
 
 > **Disclaimer:** an independent port by idle-intelligence, not affiliated with or endorsed by The Forecasting Company. Weights are quantized from [theforecastingcompany/t0-alpha](https://huggingface.co/theforecastingcompany/t0-alpha) and [theforecastingcompany/t0-beta](https://huggingface.co/theforecastingcompany/t0-beta) (Apache-2.0); forecasts may differ slightly from the PyTorch implementation.
 
