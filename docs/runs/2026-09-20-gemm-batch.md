@@ -1,11 +1,10 @@
 # t0-fast batch GEMM: two register-blocking attempts, both reverted
 
 Machine: Apple M2. Native via `t0-cli bench --backend fast`
-(Metal/wgpu-native). GPU-contention rule checked before every timing run
-(`pgrep -f 'Chrome for Testing'`, plus a check for any other GPU job,
-see "contention note" below). Fixture: `us_births`-equivalent bench window (context 512, horizon
+(Metal/wgpu-native). GPU idle before every timing run (see "contention
+note" below). Fixture: `us_births`-equivalent bench window (context 512, horizon
 32), weights `theforecastingcompany/t0-alpha` (F32 safetensors, and the
-existing `t0-alpha-q8_0.gguf`/`t0-alpha-q4_0.gguf` in `bench/ours/`).
+existing `t0-alpha-q8_0.gguf`/`t0-alpha-q4_0.gguf` exports).
 Starting point: commit `e8fae27` (main tip), which already carries five
 earlier runs' work (`docs/runs/2026-09-20-perf.md`) ending in a 2x2
 register-blocked, 32x32-output-tile, `TK=16` tiled GEMM

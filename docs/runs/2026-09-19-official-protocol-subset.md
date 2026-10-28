@@ -15,9 +15,9 @@ split with no subsampling, `t0.evaluation.T0Predictor`, `gluonts.model.evaluate_
 - **(b) onnx-int8** — their first-party `t0-alpha-onnx-int8` export
   (`t0-alpha-grouped-int8.onnx`, per-channel signed INT8 weights / FP32
   compute), run through `onnxruntime` with a predictor wrapper matching
-  `T0Predictor`'s interface (`tools/fullsuite/onnx_predictor.py`).
+  `T0Predictor`'s interface.
 - **(c) q8_0** — our GGUF Q8_0 export, dequantized back to f32
-  (`tools/fullsuite/dequant_gguf.py`) and loaded into the SAME PyTorch
+  and loaded into the SAME PyTorch
   reference architecture/predictor as (a) — a fake-quant: only the weights
   differ from (a).
 - **(d) q4_0** — same, our GGUF Q4_0.
@@ -29,14 +29,16 @@ split with no subsampling, `t0.evaluation.T0Predictor`, `gluonts.model.evaluate_
   `saugeen` — same series, see that doc).
 
 None of our Rust/Burn port is touched by (a)-(d); this is entirely "their
-code" apart from the substituted weights in (c)/(d).
+code" apart from the substituted weights in (c)/(d). The Python harness that
+wraps it (ONNX predictor, GGUF dequantizer, per-variant runner) is not part
+of this repository.
 
 ## Versions
 
 - Python 3.14.3, `torch` 2.14.0, `gluonts` 0.15.1, `tfc-t0` 0.5.0,
   `salesforce-gift-eval` 0.0.0a0 (all from the repo's `.venv`),
   `onnxruntime` 1.24.2 (a system Python 3.14 install, bridged in via `sys.path.append` inside
-  `onnx_predictor.py` — appended, not prepended, to avoid shadowing the
+  the ONNX predictor — appended, not prepended, to avoid shadowing the
   venv's numpy/pyarrow, which broke `datasets`' arrow formatting on the
   first attempt).
 - Weights: `theforecastingcompany/t0-alpha` (`model.safetensors`, sha
@@ -45,33 +47,25 @@ code" apart from the substituted weights in (c)/(d).
   sha256 `82da4392...`, downloaded this run to
   `$MODELS_DIR/hf/theforecastingcompany/t0-alpha-onnx-int8/`).
 - Our GGUF exports: `t0-cli export-gguf --quant q8_0|q4_0` (binary built at
-  commit `4404b6f`),
-  written to `tools/fullsuite/weights/t0-alpha-{q8_0,q4_0}.gguf`.
+  commit `4404b6f`).
 
 ## Commands
 
 ```
-# GGUF exports (already-built t0-cli)
-t0-cli export-gguf --weights <t0-alpha>/model.safetensors --config <t0-alpha>/config.json --quant q8_0 --out tools/fullsuite/weights/t0-alpha-q8_0.gguf
-t0-cli export-gguf --weights <t0-alpha>/model.safetensors --config <t0-alpha>/config.json --quant q4_0 --out tools/fullsuite/weights/t0-alpha-q4_0.gguf
-
-# dequant + per-tensor error table + forward parity
-.venv/bin/python3 tools/fullsuite/dequant_gguf.py --gguf tools/fullsuite/weights/t0-alpha-q8_0.gguf \
-    --reference-safetensors <t0-alpha>/model.safetensors --config <t0-alpha>/config.json \
-    --out tools/fullsuite/weights/t0-alpha-q8_0.dequant.safetensors --fixture fixtures/case0_univariate_sine
-# (same for q4_0)
-
-# official-protocol eval, per variant
-.venv/bin/python3 tools/fullsuite/run_gifteval.py --variant f32 --max-minutes 45
-.venv/bin/python3 tools/fullsuite/run_gifteval.py --variant q8_0 --max-minutes 45
-.venv/bin/python3 tools/fullsuite/run_gifteval.py --variant q4_0 --max-minutes 45
-.venv/bin/python3 tools/fullsuite/run_gifteval.py --variant onnx-int8 --max-minutes 45
+# GGUF exports
+t0-cli export-gguf --weights <t0-alpha>/model.safetensors --config <t0-alpha>/config.json --quant q8_0 --out t0-alpha-q8_0.gguf
+t0-cli export-gguf --weights <t0-alpha>/model.safetensors --config <t0-alpha>/config.json --quant q4_0 --out t0-alpha-q4_0.gguf
 ```
+
+Then, with the harness: dequantize each GGUF back to f32 safetensors with a
+per-tensor error table and a one-fixture forward parity check
+(`fixtures/case0_univariate_sine`), and run the official-protocol eval once
+per variant (f32, q8_0, q4_0, onnx-int8), 45-minute cap each.
 
 ## Dequant parity: GGUF -> f32 vs original safetensors
 
 Per-tensor max-abs/max-rel error over all 303 tensors (worst-case shown;
-full per-tensor table is printed by `dequant_gguf.py`, not committed). The
+full per-tensor table is printed by the dequantizer, not committed). The
 big max-rel values are expected and harmless: they occur on near-zero
 reference elements (max-rel is unbounded as the denominator -> 0; see
 `per_tensor_error_table`'s `max(|ref|, 1e-8)` floor) and are dominated by

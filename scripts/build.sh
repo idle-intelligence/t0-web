@@ -2,7 +2,7 @@
 # Builds both t0-wasm engines (fast/WebGPU and ndarray/CPU) and assembles the
 # deployed site into _site/: web/ (the demo) plus bench/compare/ (the
 # compare page, which loads its own models from Hugging Face and onnxruntime
-# from jsdelivr, never from bench/onnx or bench/ours).
+# from jsdelivr).
 #
 # Rewrites the ENGINE_BUILD tag on every wasm loading URL (web/worker.js,
 # bench/compare/compare.js) and checks neither built wasm carries a local

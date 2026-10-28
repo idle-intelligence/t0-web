@@ -57,10 +57,9 @@ framework and its cubecl GPU-kernel compiler.
 
 ## onnxruntime-web
 
-`bench/onnx/` and `bench/compare/` optionally load onnxruntime-web at
-runtime (via a local `ort.webgpu.min.js` + WASM build, not committed to
-this repo — see `.gitignore`) to benchmark this port against the official
-ONNX export. onnxruntime-web is not vendored or redistributed here.
+`bench/compare/` loads onnxruntime-web at runtime from the jsdelivr CDN
+to compare this port against the official ONNX export. onnxruntime-web is
+not vendored or redistributed here.
 
 - Project: https://github.com/microsoft/onnxruntime
 - License: MIT

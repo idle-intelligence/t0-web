@@ -8,7 +8,9 @@ subsampling. Only the weights/variant plumbing differs (t0-beta dir,
 21-level quantiles per its config, beta gguf files).
 
 `dequant_gguf.read_gguf` is imported from `FULLSUITE_TOOLS_DIR` (generic,
-no alpha-specific hardcoding) rather than duplicated. `GIFT_EVAL_DIR` is a
+no alpha-specific hardcoding) rather than duplicated. That full-suite
+harness is not part of this repository, so this script does not run on a
+fresh clone; it is kept as the exact record of the beta run. `GIFT_EVAL_DIR` is a
 checkout of SalesforceAIResearch/gift-eval (for its
 `notebooks/dataset_properties.json`).
 

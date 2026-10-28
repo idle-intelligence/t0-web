@@ -5,18 +5,18 @@
   release build was compiling during the wasm-pack builds below (compile-only, no GPU device touched); no other process held
   the GPU device during any headless run (webgpu bench calls run
   sequentially, one at a time, never concurrently).
-- Commit: `09a7ed9` + this run's uncommitted changes (`t0-cli forecast-raw`,
-  `t0_core::forecast_batch_chunked_async`, `T0Wasm::forecastBatch`,
-  `bench/onnx/`, `bench/ours/`).
+- Commit: `09a7ed9` + this run's changes (`t0-cli forecast-raw`,
+  `t0_core::forecast_batch_chunked_async`, `T0Wasm::forecastBatch`).
+- Harness: two browser bench pages (one per engine) and their headless
+  runners. They are not part of this repository; the compare page
+  (`bench/compare/`) runs the same protocol for both engines in one tab.
 - Browser: Playwright's bundled Chromium-for-Testing, `chromium-1243`
-  (`Google Chrome for Testing 153.0.8010.12`), launched with an explicit
-  `executablePath`, never a personal browser.
+  (`Google Chrome for Testing 153.0.8010.12`).
 - `onnxruntime-web`: `1.29.0` (pinned to match the artifact's own validation
   card, `manifest.json`'s `runtime.onnxruntime_web`), installed via
-  `npm install --save-dev onnxruntime-web@1.29.0` — a local copy is served
-  from `bench/onnx/` (`ort.webgpu.min.js` + the `ort-wasm-simd-threaded.*`
-  wasm/mjs files copied from `node_modules/onnxruntime-web/dist/`), no CDN
-  at test time.
+  `npm install --save-dev onnxruntime-web@1.29.0` and served locally
+  (`ort.webgpu.min.js` + the `ort-wasm-simd-threaded.*` files from
+  `node_modules/onnxruntime-web/dist/`), no CDN at test time.
 - wgpu backend: `burn-wgpu` / `burn` `0.20` (`Cargo.toml`), `cubecl-wgpu`
   transitively (pinned pre-1.0 versions).
 - Artifact under test (theirs): `theforecastingcompany/t0-alpha-onnx-int8`
@@ -58,15 +58,13 @@
   Both `wasm-pack build crates/t0-wasm --target web --release` and
   `... --out-dir pkg-wgpu --release -- --no-default-features --features
   wgpu` built clean.
-- `bench/onnx/index.html` + `scripts/headless/run_onnx_bench.mjs`: loads
-  the official ONNX export through `onnxruntime-web`, WebGPU EP first
+- ONNX bench page: loads the official ONNX export through `onnxruntime-web`, WebGPU EP first
   (with the artifact's own `webgpu-options.js` `forceCpuNodeNames` list —
   copied inline into the harness, not re-fetched), falls back to `wasm` on
   failure. Reports cold (first `session.run`, includes graph
   init/compile), warm (median of 10), and a 24-row batch (all rows given
   the same context).
-- `bench/ours/index.html` + `scripts/headless/run_ours_bench.mjs`: same
-  protocol against `t0-wasm`'s `pkg`/`pkg-wgpu` builds, one page load per
+- Our bench page: same protocol against `t0-wasm`'s `pkg`/`pkg-wgpu` builds, one page load per
   (backend, quant) combination so nothing is shared/warmed across rows.
 
 ## Commands (exact)
@@ -80,23 +78,18 @@ cargo build -p t0-cli --release
   --series-file web/data/series.f32 --origin 3600 --context 512 --horizon 32 \
   --out /tmp/t0_f32_ref_origin3600.f32
 
-# their side
-npm install --save-dev onnxruntime-web@1.29.0
-cd bench/onnx && python3 -m http.server 8032 &
-node scripts/headless/run_onnx_bench.mjs --url http://127.0.0.1:8032/
-
-# our side
+# our wasm builds
 wasm-pack build crates/t0-wasm --target web --release
 wasm-pack build crates/t0-wasm --target web --out-dir pkg-wgpu --release -- --no-default-features --features wgpu
-cd bench/ours && python3 -m http.server 8033 &
-node scripts/headless/run_ours_bench.mjs --url http://127.0.0.1:8033/ --pkg ./pkg-wgpu --gguf ./t0-alpha-q8_0.gguf --label "Q8_0 WebGPU"
-node scripts/headless/run_ours_bench.mjs --url http://127.0.0.1:8033/ --pkg ./pkg-wgpu --gguf ./t0-alpha-q4_0.gguf --label "Q4_0 WebGPU"
-node scripts/headless/run_ours_bench.mjs --url http://127.0.0.1:8033/ --pkg ./pkg     --gguf ./t0-alpha-q8_0.gguf --label "Q8_0 CPU"
 ```
+
+Each bench page was then run headlessly, one page load per (engine,
+backend, quant): ONNX INT8 WebGPU, our Q8_0 WebGPU, our Q4_0 WebGPU, our
+Q8_0 CPU.
 
 ## Which execution provider ran, theirs
 
-**WebGPU.** `bench/onnx/index.html` requests the `webgpu` EP (with the
+**WebGPU.** The ONNX bench page requests the `webgpu` EP (with the
 artifact's own `forceCpuNodeNames` override list) first and only falls
 back to `wasm` if session creation or the first `run()` throws. Neither
 happened — `results.ep === 'webgpu'` on every run, no fallback triggered,
@@ -118,9 +111,7 @@ Metal adapter over `http://` by default, same finding as
 Warm raw reps (ms), all 10 per row:
 
 - theirs (webgpu): `[81.2, 79.7, 79.8, 63.0, 61.5, 62.7, 60.4, 65.0, 65.5, 60.5]`
-- ours Q8_0 webgpu: see `/tmp/ours_q8_webgpu.json` (this run, not committed — file MB/ms summarized above)
-- ours Q4_0 webgpu: see `/tmp/ours_q4_webgpu.json`
-- ours Q8_0 cpu: see `/tmp/ours_q8_cpu.json`
+- ours: raw reps not kept; medians in the table above.
 
 ## Verification: ONNX INT8 output vs our F32 reference, same window
 
@@ -185,7 +176,7 @@ only — reference PyTorch F32 vs our F32/Q8_0/Q4_0) has aggregate numbers:
 
 **This does not include the ONNX INT8 artifact** — running the official
 export through the full `gluonts`-based GIFT-Eval harness (Python,
-`onnxruntime` CPU EP, per the full-suite harness's `onnx_predictor.py`)
+`onnxruntime` CPU EP, per the full-suite harness's ONNX predictor)
 is a separate, longer task not attempted in this run. The table in `docs/BENCHMARKS.md`
 below marks this cell N/A rather than inferring it from the published
 full-protocol number (different context length, different config set —
