@@ -16,9 +16,12 @@ const ORT_WASM_PATHS = ORT_CDN_BASE;
 
 // Same engine-build version tag web/worker.js uses on its wasm URLs, so a
 // hard reload here picks up a rebuilt pkg-wgpu the same way the demo does.
-const ENGINE_BUILD = '2026-10-28';
+const ENGINE_BUILD = '2026-10-28.2';
 
-const ONNX_MODEL_URL = 'https://huggingface.co/theforecastingcompany/t0-alpha-onnx-int8/resolve/main/t0-alpha-grouped-int8.onnx';
+// The Forecasting Company's export, pinned to one revision so the page and
+// the node list below always describe the same graph.
+const ONNX_REVISION = '95c0ad00fbb08d1bd5f72d3e6274f6f2e80f45c0';
+const ONNX_MODEL_URL = `https://huggingface.co/theforecastingcompany/t0-alpha-onnx-int8/resolve/${ONNX_REVISION}/t0-alpha-grouped-int8.onnx`;
 const ONNX_SERIES_URL = '../../web/data/series.f32';
 const OURS_PKG = `../../web/pkg-wgpu/t0_wasm.js?v=${ENGINE_BUILD}`;
 const OURS_WASM = `../../web/pkg-wgpu/t0_wasm_bg.wasm?v=${ENGINE_BUILD}`;
@@ -45,15 +48,64 @@ const QUANTILE_LEVELS = [0.10, 0.25, 0.50, 0.75, 0.90];
 const NQ = QUANTILE_LEVELS.length;
 const MEDIAN_IDX = 2; // index of 0.50 in QUANTILE_LEVELS
 
-// ONNX WebGPU EP: the artifact's own forceCpuNodeNames override list,
-// copied inline (same as bench/onnx/index.html) rather than re-fetched.
+// ONNX WebGPU EP: the forceCpuNodeNames list from the export's own
+// webgpu-options.js at revision 95c0ad00fbb08d1bd5f72d3e6274f6f2e80f45c0 (the same revision as
+// ONNX_MODEL_URL), copied verbatim. Its graphOptimizationLevel, 'basic', is
+// the one makeOnnxSession uses.
 const FORCE_CPU_NODE_NAMES = [
-    'n5_3', 'n5_4', 'n5_5', 'n5_6', 'n5', 'n5_2', 'node_bitwise_not', 'node_bitwise_or', 'node_ne',
-    'node_cos', 'node_sin', 'node_bitwise_not_1', 'node_bitwise_not_5', 'node_bitwise_and',
-    'node_pow_2', 'node_bitwise_not_3', 'node_bitwise_not_6', 'node_pow_3', 'node_bitwise_not_8',
-    'node_pow_1', 'node_bitwise_and_1', 'node_bitwise_not_7', 'node_bitwise_and_7', 'node_bitwise_and_2',
-    'node_bitwise_and_8', 'node_bitwise_and_3', 'node_bitwise_and_4', 'node_bitwise_and_5',
-    'node_bitwise_or_2', 'node_bitwise_and_6', 'node_sinh',
+    'node_Shape_5', 'node_Shape_14', 'node_Shape_49', 'node_Shape_0', 'node_Shape_1',
+    'node_Shape_47', 'node_sym_size_int_90', 'node_sym_size_int_6', 'node_Concat_80', 'n5_3',
+    'n5_4', 'n5_5', 'n5_6', 'node_sym_size_int_85', 'node_Concat_42', 'node_Concat_4208',
+    'node_sym_size_int_86', 'n5', 'n5_2', 'node__to_copy_4', 'node_floordiv_1', 'node_add_9003',
+    'node_mul_7525', 'node_add_5', 'node_view', 'node_Reshape_131', 'node_Shape_45', 'node_mod_1',
+    'node_expand_2', 'node__to_copy_5', 'node_add_6', 'node_Reshape_20', 'node_add_95',
+    'node_view_1', 'node_floordiv', 'node_Reshape_132', 'node_Concat_23', 'node_Reshape_56',
+    'node_arange', 'node_floordiv_3', 'node_expand_3', 'node_Reshape_147', 'node_arange_1',
+    'node_Concat_133', 'node_Concat_57', 'node_sub_3869', 'node_Concat_149', 'node_Concat_170',
+    'node_Concat_227', 'node_Concat_308', 'node_Concat_326', 'node_Concat_419', 'node_Concat_647',
+    'node_Concat_701', 'node_Concat_4140', 'node_unsqueeze_6', 'node_unsqueeze_7', 'node_expand',
+    'node_expand_1', 'node_add_8987', 'node_Reshape_4196', 'node_Shape_70', 'node_Shape_72',
+    'node_Reshape_4199', 'node_Shape_91', 'node_ones_like', 'node_ones_like_1', 'node_ne',
+    'node_bitwise_or_2', 'node_neg', 'node_neg_1', 'node_bitwise_or', 'node_bitwise_or_3',
+    'node_ne_5', 'node_where_9', 'node_where_10', 'node_cos', 'node_sin', 'node_bitwise_not',
+    'node_Cast_180', 'node_cat_8', 'node_cat_9', 'node_argmax', 'node_ReduceMax_183', 'node_view_7',
+    'node_view_6', 'node_gather_1', 'node_bitwise_and_1', 'node_bitwise_or_1', 'node_gather',
+    'node_pow_1', 'node_squeeze_1', 'node_bitwise_and_2', 'node_squeeze', 'node_bitwise_and',
+    'node_where_22', 'node_where_21', 'node_unsqueeze_2', 'node_unsqueeze_3', 'node_permute',
+    'node_clamp_6', 'node_unsqueeze_10', 'node_unsqueeze_11', 'node_pow_2', 'node_bitwise_and_3',
+    'node_bitwise_not_3', 'node_bitwise_and_4', 'node_bitwise_and_9', 'node_bitwise_not_4',
+    'node_bitwise_and_5', 'node_bitwise_and_6', 'node_bitwise_and_10', 'node_bitwise_and_11',
+    'node_bitwise_and_7', 'node_bitwise_not_5', 'node_bitwise_or_4', 'node_bitwise_and_12',
+    'node_Shape_105', 'node_bitwise_and_8', 'node_Shape_144', 'node_Shape_390', 'node_Slice_392',
+    'node_Slice_394', 'node_Slice_396', 'node_Concat_398', 'node_Concat_401', 'node_Shape_599',
+    'node_Slice_601', 'node_Slice_602', 'node_Slice_604', 'node_Concat_606', 'node_Concat_609',
+    'node_Shape_673', 'node_Slice_675', 'node_Slice_676', 'node_Slice_678', 'node_Concat_680',
+    'node_Concat_683', 'node_Shape_880', 'node_Slice_882', 'node_Slice_883', 'node_Slice_885',
+    'node_Concat_887', 'node_Concat_890', 'node_Shape_1087', 'node_Slice_1089', 'node_Slice_1090',
+    'node_Slice_1092', 'node_Concat_1094', 'node_Concat_1097', 'node_Shape_1161', 'node_Slice_1163',
+    'node_Slice_1164', 'node_Slice_1166', 'node_Concat_1168', 'node_Concat_1171', 'node_Shape_1368',
+    'node_Slice_1370', 'node_Slice_1371', 'node_Slice_1373', 'node_Concat_1375', 'node_Concat_1378',
+    'node_Shape_1575', 'node_Slice_1577', 'node_Slice_1578', 'node_Slice_1580', 'node_Concat_1582',
+    'node_Concat_1585', 'node_Shape_1649', 'node_Slice_1651', 'node_Slice_1652', 'node_Slice_1654',
+    'node_Concat_1656', 'node_Concat_1659', 'node_Shape_1856', 'node_Slice_1858', 'node_Slice_1859',
+    'node_Slice_1861', 'node_Concat_1863', 'node_Concat_1866', 'node_Shape_2063', 'node_Slice_2065',
+    'node_Slice_2066', 'node_Slice_2068', 'node_Concat_2070', 'node_Concat_2073', 'node_Shape_2137',
+    'node_Slice_2139', 'node_Slice_2140', 'node_Slice_2142', 'node_Concat_2144', 'node_Concat_2147',
+    'node_Shape_2344', 'node_Slice_2346', 'node_Slice_2347', 'node_Slice_2349', 'node_Concat_2351',
+    'node_Concat_2354', 'node_Shape_2551', 'node_Slice_2553', 'node_Slice_2554', 'node_Slice_2556',
+    'node_Concat_2558', 'node_Concat_2561', 'node_Shape_2625', 'node_Slice_2627', 'node_Slice_2628',
+    'node_Slice_2630', 'node_Concat_2632', 'node_Concat_2635', 'node_Shape_2832', 'node_Slice_2834',
+    'node_Slice_2835', 'node_Slice_2837', 'node_Concat_2839', 'node_Concat_2842', 'node_Shape_3039',
+    'node_Slice_3041', 'node_Slice_3042', 'node_Slice_3044', 'node_Concat_3046', 'node_Concat_3049',
+    'node_Shape_3113', 'node_Slice_3115', 'node_Slice_3116', 'node_Slice_3118', 'node_Concat_3120',
+    'node_Concat_3123', 'node_Shape_3320', 'node_Slice_3322', 'node_Slice_3323', 'node_Slice_3325',
+    'node_Concat_3327', 'node_Concat_3330', 'node_Shape_3527', 'node_Slice_3529', 'node_Slice_3530',
+    'node_Slice_3532', 'node_Concat_3534', 'node_Concat_3537', 'node_Shape_3601', 'node_Slice_3603',
+    'node_Slice_3604', 'node_Slice_3606', 'node_Concat_3608', 'node_Concat_3611', 'node_Shape_3808',
+    'node_Slice_3810', 'node_Slice_3811', 'node_Slice_3813', 'node_Concat_3815', 'node_Concat_3818',
+    'node_Shape_4015', 'node_Slice_4017', 'node_Slice_4018', 'node_Slice_4020', 'node_Concat_4022',
+    'node_Concat_4025', 'node_Shape_4089', 'node_Slice_4091', 'node_Slice_4092', 'node_Slice_4094',
+    'node_Concat_4096', 'node_Concat_4099', 'node_sinh',
 ];
 
 // onnxruntime-web is loaded lazily from the CDN, only when a run starts.
