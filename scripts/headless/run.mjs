@@ -19,13 +19,12 @@
 // Backend is auto-selected by web/worker.js (WebGPU if navigator.gpu
 // exists, else WASM CPU/burn-ndarray) -- this bundled Chromium-for-Testing
 // exposes navigator.gpu with a real hardware adapter on http origins with
-// no extra launch flags needed (confirmed this session on this Mac; see
+// no extra launch flags needed on Apple M2 (see
 // docs/runs/2026-09-19-web-smoke.md).
 //
 // Usage: node scripts/headless/run.mjs [--url http://127.0.0.1:PORT/]
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import os from 'node:os';
 
 function parseArgs(argv) {
   const out = {};
@@ -48,13 +47,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const { chromium } = await import('playwright');
 
-// Same cached Chromium-for-Testing binary this session verified works
-// standalone (`node -e "require('playwright').chromium.launch(...)"`) --
-// passed explicitly so this doesn't depend on playwright's own browser
-// revision bookkeeping matching whatever happens to be cached.
-const EXECUTABLE_PATH =
-  process.env.CHROMIUM_PATH ||
-  path.join(os.homedir(), 'Library/Caches/ms-playwright/chromium-1229/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing');
+// Playwright's bundled Chromium unless CHROMIUM_PATH names another binary.
+const EXECUTABLE_PATH = process.env.CHROMIUM_PATH || undefined;
 
 async function main() {
   const browser = await chromium.launch({ executablePath: EXECUTABLE_PATH });

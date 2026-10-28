@@ -574,7 +574,7 @@ fn cmd_gifteval_fast(manifest_dir: &Path, weights_path: &Path, config_path: Opti
 
 /// F32 (`fast_quant=f32`) compares against the fixtures' F32-reference
 /// quantile files, same gate as `cmd_parity`. Q8_0/Q4_0 compare against
-/// *Burn's own* Q8_0/Q4_0 path instead (per this task's brief): the F32
+/// *Burn's own* Q8_0/Q4_0 path instead: the F32
 /// weights are round-tripped through `Weights::export_gguf`/`load_gguf`
 /// (the same `quantize_q8_0`/`quantize_q4_0` math `t0-fast::quant` uses)
 /// and forecast on the `ndarray` backend, since the F32 fixtures already

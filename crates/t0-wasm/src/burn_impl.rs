@@ -65,7 +65,7 @@ impl T0Wasm {
         Ok(T0Wasm { model })
     }
 
-    /// Number of trained quantile levels (5 for t0-alpha/t0-beta) — the
+    /// Number of trained quantile levels (5 for t0-alpha, 21 for t0-beta): the
     /// caller uses this to interpret `forecast`'s flat output as
     /// `[horizon, n_quantiles]`, quantile-minor (matches `t0-cli`'s own
     /// output layout, see `forecast_series` in `t0-core/src/model.rs`).
@@ -92,8 +92,7 @@ impl T0Wasm {
     }
 
     /// `n_signals` independent forecasts in one call, each over the same
-    /// `context` (used for batch-latency benchmarking, see
-    /// `bench/ours/index.html`), internally chunked at `chunk_size` (0 means
+    /// `context` (used for batch-latency benchmarking), internally chunked at `chunk_size` (0 means
     /// "no chunking") the same way `t0-cli bench --chunk` is on native — see
     /// `t0_core::forecast_batch_chunked_async`'s doc comment for why the
     /// chunk cap exists on `wgpu`. Returns `n_signals * horizon * n_quantiles`

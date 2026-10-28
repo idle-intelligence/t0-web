@@ -952,9 +952,19 @@
                 }
                 case 'error':
                     forecasting = false;
-                    forecastBtn.disabled = false;
                     modelSwitching = false;
-                    setModelInputsEnabled(currentModelKey);
+                    if (window.__app.ready) {
+                        forecastBtn.disabled = false;
+                        setModelInputsEnabled(currentModelKey);
+                    } else {
+                        // A load failed: no model is loaded, so every radio
+                        // stays clickable to retry, the failed one included.
+                        currentModelKey = null;
+                        for (const input of modelInputs) {
+                            input.checked = false;
+                            input.disabled = false;
+                        }
+                    }
                     setDot('error');
                     setStatus('Error: ' + msg.message);
                     console.error(msg.message);

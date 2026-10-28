@@ -85,9 +85,8 @@ fn q8_and_f32_models_share_engine_without_cross_contamination() {
 
 /// Two *different-config* GGUF models (t0-alpha, t0-beta) sharing one
 /// `Engine`: a stronger version of the same regression, since alpha/beta
-/// differ in more than quantization (different uniform struct sizes for
-/// some call sites in the beta CLI's own history, per the task brief) --
-/// if any cache were keyed only by call-site string and shape, this is
+/// differ in more than quantization (embed_dim and quantile count, so
+/// different buffer sizes at the same call sites) -- if any cache were keyed only by call-site string and shape, this is
 /// the case most likely to produce a wrong-size or wrong-buffer bind
 /// group instead of just wrong values.
 /// Skips (does not fail) if the beta GGUF fixture isn't present: it's not
@@ -104,7 +103,7 @@ fn alpha_and_beta_models_share_engine_without_cross_contamination() {
     let beta_path = fixtures_dir.join("beta/gguf/t0-beta-q8_0.gguf");
     if !alpha_path.exists() || !beta_path.exists() {
         eprintln!(
-            "skipping: alpha fixture ({}) or beta fixture ({}) not found -- beta worktree fixtures are optional",
+            "skipping: alpha fixture ({}) or beta fixture ({}) not found -- the beta GGUF is optional",
             alpha_path.display(),
             beta_path.display()
         );

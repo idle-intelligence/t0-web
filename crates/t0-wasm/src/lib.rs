@@ -4,10 +4,9 @@
 //! `fast` -> `t0-fast`), same convention as `crates/cli`, never a runtime
 //! switch inside the library. Both variants export the identical
 //! `initBackend`/`T0Wasm.{load,nQuantiles,forecast,forecastBatch}` JS
-//! surface (see `README.md`), so `web/worker.js` can pick a `pkg*` build
-//! by feature (preferring `pkg-fast` under WebGPU, falling back to
-//! `pkg-wgpu` then `pkg`) without any JS-side branching on which engine it
-//! got.
+//! surface (see `README.md`), so `web/worker.js` loads the `fast` build
+//! (served as `pkg-wgpu/`) when WebGPU works and the `ndarray` build
+//! (`pkg/`) otherwise, with no JS-side branching on which engine it got.
 
 #[cfg(not(feature = "fast"))]
 mod burn_impl;

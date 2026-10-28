@@ -1,6 +1,6 @@
 //! Round-trip safetensors -> GGUF -> dequant-at-load, checked against the
-//! reference PyTorch quantile fixtures. f16 is gated (<=1e-3 max-abs, per
-//! this milestone's brief); Q8_0/Q4_0 error is recorded (printed), not
+//! reference PyTorch quantile fixtures. f16 is gated (<=1e-3 max-abs);
+//! Q8_0/Q4_0 error is recorded (printed), not
 //! gated — the accuracy verdict for those belongs to the GIFT-Eval step.
 //! `#[ignore]`d: needs the t0-alpha checkpoint (never committed).
 

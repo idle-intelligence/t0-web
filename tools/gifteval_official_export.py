@@ -5,7 +5,7 @@ window of the series, full history if shorter) instead of the 512-step cap.
 
 This is the manifest `t0-cli gifteval --backend fast` (via `--manifest`)
 consumes for the "official-protocol subset" row in `docs/BENCHMARKS.md` --
-see `docs/runs/2026-09-20-rollout.md`'s rollout-fixed session for why this
+see `docs/runs/2026-09-20-rollout.md`'s follow-up section for why this
 needed `forecast_rollout`'s AR loop working at all: earlier attempts landed
 in `docs/runs/2026-09-19-official-protocol-subset.md` (their own PyTorch
 code, not ours) because our engines had no autoregressive rollout yet.

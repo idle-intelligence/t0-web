@@ -1,24 +1,25 @@
 # t0-wasm
 
-`wasm-bindgen` surface over `t0-core` for the one-signal browser instrument
-(`web/`). Self-contained: only depends on `t0-core` (path dependency in
-this workspace), never on `llm-web`.
+`wasm-bindgen` surface for the browser demo (`web/`) and the compare page
+(`bench/compare/`), over either `t0-fast` (WebGPU) or `t0-core` (Burn, CPU).
+Depends only on crates in this workspace.
 
 ## Build
 
-Two separate `wasm-pack` outputs, one per backend feature (backend is a
-compile-time Cargo feature, same convention as `crates/cli` — never a
-runtime switch inside the library):
+Separate `wasm-pack` outputs, one per backend feature (backend is a
+compile-time Cargo feature, same convention as `crates/cli`, never a
+runtime switch inside the library). `scripts/build.sh` builds the two the
+site uses:
 
 ```
+wasm-pack build crates/t0-wasm --target web --out-dir pkg-fast --release --no-default-features --features fast
 wasm-pack build crates/t0-wasm --target web --release
-wasm-pack build crates/t0-wasm --target web --out-dir pkg-wgpu --release -- --no-default-features --features wgpu
 ```
 
-Produces `crates/t0-wasm/pkg/` (ndarray/CPU) and `crates/t0-wasm/pkg-wgpu/`
-(wgpu/WebGPU), each `t0_wasm.js` + `.wasm`. `web/worker.js` copies both
-into `web/pkg/` and `web/pkg-wgpu/` (gitignored, rebuild-and-copy, not
-committed) and picks one at runtime based on `navigator.gpu`.
+and places `pkg-fast/` (t0-fast, WebGPU) at `web/pkg-wgpu/` and `pkg/`
+(ndarray, CPU) at `web/pkg/`. `web/worker.js` loads the WebGPU build when
+the browser can create a WebGPU device, the CPU build otherwise. The
+`wgpu` feature (Burn on WebGPU) still builds, but the site does not use it.
 
 ## API
 
@@ -35,18 +36,18 @@ committed) and picks one at runtime based on `navigator.gpu`.
   sync `into_data()` — see "WebGPU status"). Returns `horizon * nQuantiles()`
   values, time-major then quantile-minor (same layout as `t0-cli gifteval`'s
   output).
-- `instance.nQuantiles() -> number` — 5 for both t0-alpha and t0-beta
+- `instance.nQuantiles() -> number` — 5 for t0-alpha, 21 for t0-beta
   (`config.quantile_levels.len()`).
 
 ## Backend
 
-Compile-time Cargo feature: `ndarray` (default, CPU, `burn-ndarray`) or
-`wgpu` (`burn_wgpu::Wgpu<f32, i32>`), mutually exclusive. `web/worker.js`
-selects which built `pkg` to load based on `navigator.gpu` at runtime;
+Compile-time Cargo feature: `ndarray` (default, CPU, `burn-ndarray`),
+`wgpu` (`burn_wgpu::Wgpu<f32, i32>`) or `fast` (`t0-fast`), mutually
+exclusive. `web/worker.js` selects which built `pkg` to load at runtime;
 `forecast` and `initBackend` are async on every backend so the JS caller
 never has to branch on which one it got.
 
-## WebGPU status: wired up and verified end to end
+## WebGPU on the Burn `wgpu` feature
 
 Two hazards had to be fixed to get `wgpu` working in a real browser (not
 just compiling for wasm32):
@@ -73,7 +74,7 @@ just compiling for wasm32):
    `ndarray` (still safe/cheap to await so JS doesn't need to branch).
 
 Verified in Playwright's bundled Chromium-for-Testing (`chromium-1229`,
-`150.0.7871.24`) on this Mac (Apple M2): **no special launch flags were
+`150.0.7871.24`) on an Apple M2: **no special launch flags were
 needed** — `navigator.gpu` is present with a real hardware Metal adapter on
 `http://` origins in this Chromium version by default (confirmed via
 `adapter.features` listing GPU-specific features like `subgroups`,
@@ -81,5 +82,5 @@ needed** — `navigator.gpu` is present with a real hardware Metal adapter on
 `about:blank`, which has an opaque origin). `--enable-unsafe-webgpu` /
 `--use-angle=metal` were not needed and not passed — this Chromium-for-Testing
 revision (150.0.7871.24) already ships WebGPU enabled by default over `http://`
-origins on this Mac; see `docs/runs/2026-09-19-web-smoke.md` for the exact
+origins on that machine; see `docs/runs/2026-09-19-web-smoke.md` for the exact
 headless run and numbers.

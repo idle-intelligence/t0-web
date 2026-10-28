@@ -9,41 +9,27 @@
 // per this repo's rule of driving the demo through a small API rather than
 // DOM clicks in Playwright.
 
-// Set to true to use the gitignored bench/onnx and bench/ours folders on
-// disk instead of Hugging Face and the CDN. Off by default: this is the
-// mode that gets published to GitHub Pages.
-const LOCAL_ASSETS = false;
-
-// Matches the pinned onnxruntime-web build committed at bench/onnx/ (see
-// its "ONNX Runtime Web v1.29.0" banner) and the manifest.json served
-// alongside the official INT8 export.
+// The onnxruntime-web version the official INT8 export's manifest.json
+// names.
 const ORT_VERSION = '1.29.0';
 const ORT_CDN_BASE = `https://cdn.jsdelivr.net/npm/onnxruntime-web@${ORT_VERSION}/dist/`;
-const ORT_SCRIPT_URL = LOCAL_ASSETS ? '../onnx/ort.webgpu.min.js' : `${ORT_CDN_BASE}ort.webgpu.min.js`;
-const ORT_WASM_PATHS = LOCAL_ASSETS ? '../onnx/' : ORT_CDN_BASE;
+const ORT_SCRIPT_URL = `${ORT_CDN_BASE}ort.webgpu.min.js`;
+const ORT_WASM_PATHS = ORT_CDN_BASE;
 
 // Same engine-build version tag web/worker.js uses on its wasm URLs, so a
 // hard reload here picks up a rebuilt pkg-wgpu the same way the demo does.
 const ENGINE_BUILD = '2026-09-21';
 
-const ONNX_MODEL_URL = LOCAL_ASSETS
-    ? '../onnx/t0-alpha-grouped-int8.onnx'
-    : 'https://huggingface.co/theforecastingcompany/t0-alpha-onnx-int8/resolve/main/t0-alpha-grouped-int8.onnx';
-const ONNX_SERIES_URL = LOCAL_ASSETS ? '../onnx/series.f32' : '../../web/data/series.f32';
-const OURS_PKG = LOCAL_ASSETS ? '../ours/pkg-fast/t0_wasm.js' : `../../web/pkg-wgpu/t0_wasm.js?v=${ENGINE_BUILD}`;
-const OURS_GGUF = LOCAL_ASSETS
-    ? { q8_0: '../ours/t0-alpha-q8_0.gguf', q4_0: '../ours/t0-alpha-q4_0.gguf' }
-    : {
-        q8_0: 'https://huggingface.co/idle-intelligence/t0-alpha-q8_0-webgpu/resolve/main/t0-alpha-q8_0.gguf',
-        q4_0: 'https://huggingface.co/idle-intelligence/t0-alpha-q4_0-webgpu/resolve/main/t0-alpha-q4_0.gguf',
-    };
+const ONNX_MODEL_URL = 'https://huggingface.co/theforecastingcompany/t0-alpha-onnx-int8/resolve/main/t0-alpha-grouped-int8.onnx';
+const ONNX_SERIES_URL = '../../web/data/series.f32';
+const OURS_PKG = `../../web/pkg-wgpu/t0_wasm.js?v=${ENGINE_BUILD}`;
+const OURS_GGUF = {
+    q8_0: 'https://huggingface.co/idle-intelligence/t0-alpha-q8_0-webgpu/resolve/main/t0-alpha-q8_0.gguf',
+    q4_0: 'https://huggingface.co/idle-intelligence/t0-alpha-q4_0-webgpu/resolve/main/t0-alpha-q4_0.gguf',
+};
 // F32 reference is opt-in (407 MB download) -- see the checkbox wiring below.
-const OURS_F32_SAFETENSORS = LOCAL_ASSETS
-    ? '../ours/t0-alpha-f32.safetensors'
-    : 'https://huggingface.co/theforecastingcompany/t0-alpha/resolve/main/model.safetensors';
-const OURS_F32_CONFIG = LOCAL_ASSETS
-    ? '../ours/t0-alpha-f32-config.json'
-    : 'https://huggingface.co/theforecastingcompany/t0-alpha/resolve/main/config.json';
+const OURS_F32_SAFETENSORS = 'https://huggingface.co/theforecastingcompany/t0-alpha/resolve/main/model.safetensors';
+const OURS_F32_CONFIG = 'https://huggingface.co/theforecastingcompany/t0-alpha/resolve/main/config.json';
 
 const CH_OPTIONS = [
     { context: 512, horizon: 32 },
@@ -51,7 +37,7 @@ const CH_OPTIONS = [
     { context: 256, horizon: 64 },
     { context: 2048, horizon: 128 },
 ];
-const ORIGIN = 3600; // same fixture window as bench/ours, bench/onnx, web/worker.js
+const ORIGIN = 3600; // same fixture window as the head-to-head benchmark
 const N_BATCH = 24;
 const N_WARM = 10;
 const IDLE_MS = 2000;
@@ -71,10 +57,8 @@ const FORCE_CPU_NODE_NAMES = [
     'node_bitwise_or_2', 'node_bitwise_and_6', 'node_sinh',
 ];
 
-// onnxruntime-web is loaded lazily (CDN in Pages mode, local file in
-// LOCAL_ASSETS mode) instead of a static <script> tag in index.html, so
-// this same page works from either source. `ort` is a script global once
-// loaded.
+// onnxruntime-web is loaded lazily from the CDN, only when a run starts.
+// `ort` is a script global once loaded.
 let ortReadyPromise = null;
 function ensureOrt() {
     if (!ortReadyPromise) {
@@ -618,15 +602,7 @@ async function run(overrideConfig) {
         return result;
     } catch (e) {
         const msg = e.message || String(e);
-        // A stale pkg-fast bundle (built before a wasm-bindgen export was
-        // added, e.g. forecastBatchRows/loadF32) throws a raw JS
-        // "X is not a function" TypeError -- surface that as an actionable
-        // status instead of the confusing raw message.
-        if (e instanceof TypeError && /is not a function/.test(msg)) {
-            setStatus('loading', 'reloading the II engine...');
-        } else {
-            setStatus('error', 'error: ' + msg);
-        }
+        setStatus('error', 'error: ' + msg);
         throw e;
     } finally {
         document.getElementById('runBtn').disabled = false;

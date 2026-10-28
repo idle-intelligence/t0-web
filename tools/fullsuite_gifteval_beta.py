@@ -7,11 +7,12 @@ windowing, `gluonts.model.evaluate_model` + their metrics,
 subsampling. Only the weights/variant plumbing differs (t0-beta dir,
 21-level quantiles per its config, beta gguf files).
 
-`dequant_gguf.read_gguf` is imported read-only from the fullsuite worktree
-(generic, no alpha-specific hardcoding) rather than duplicated.
+`dequant_gguf.read_gguf` is imported from `FULLSUITE_TOOLS_DIR` (generic,
+no alpha-specific hardcoding) rather than duplicated. `GIFT_EVAL_DIR` is a
+checkout of SalesforceAIResearch/gift-eval (for its
+`notebooks/dataset_properties.json`).
 
-venv: this repo's .venv (reused read-only, same
-as run_gifteval.py). Launch:
+venv: this repo's .venv, same as run_gifteval.py. Launch:
 
     .venv/bin/python3 \\
         tools/fullsuite_gifteval_beta.py --variant f32 --max-minutes 20
@@ -41,6 +42,7 @@ T0_BETA_DIR = os.environ.get(
     os.path.join(os.environ.get("MODELS_DIR", "models"), "hf/theforecastingcompany/t0-beta"),
 )
 GGUF_DIR = os.path.join(ROOT, "fixtures", "beta", "gguf")
+GIFT_EVAL_DIR = os.environ.get("GIFT_EVAL_DIR", os.path.join(ROOT, "gift-eval"))
 
 CONTEXT_LENGTH = 8192  # same as run_gifteval.py, their notebook's own value
 QUANTILE_LEVELS = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
@@ -144,11 +146,11 @@ def run_config(variant, ds_name, pretty_names, term="short"):
         ds_key = pretty_names.get(ds_key.lower(), ds_key.lower())
     else:
         ds_key = pretty_names.get(ds_name.lower(), ds_name.lower())
-        dataset_properties_map_tmp = json.load(open(os.path.join("/private/tmp/gift-eval/notebooks", "dataset_properties.json")))
+        dataset_properties_map_tmp = json.load(open(os.path.join(GIFT_EVAL_DIR, "notebooks", "dataset_properties.json")))
         ds_freq = dataset_properties_map_tmp[ds_key]["frequency"]
     ds_config = f"{ds_key}/{ds_freq}/{term}"
 
-    dataset_properties_map = json.load(open(os.path.join("/private/tmp/gift-eval/notebooks", "dataset_properties.json")))
+    dataset_properties_map = json.load(open(os.path.join(GIFT_EVAL_DIR, "notebooks", "dataset_properties.json")))
 
     to_univariate = Dataset(name=ds_name, term=term, to_univariate=False).target_dim != 1
     dataset = Dataset(name=ds_name, term=term, to_univariate=to_univariate)
