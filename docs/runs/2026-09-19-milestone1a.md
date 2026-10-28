@@ -200,7 +200,6 @@ recipe-vs-recipe (`int8-theirs` row) at best, not yet model-vs-model.
 ## What remains
 
 - GIFT-Eval subset harness: the accuracy verdict for Q8_0/Q4_0 belongs here, not this milestone (per the brief's own stop condition).
-- The t0.run-style page and web glue (`web/`, per GOAL.md items 3-4) — not started.
-- The METAR live-data metric (station list + fetch path from trucs.ai `knn-weather`) — not started.
+- The browser page and web glue (`web/`) — not started.
 - WGSL Q8/Q4 dequant+matmul kernels for a real WASM+WebGPU deployment — this milestone's quantization is a load-time CPU-side dequant into f32 Burn tensors, not an on-GPU kernel; deferred to the WASM/browser milestone per `docs/reports/t0-alpha.md` §5.
 - The wgpu batch-path shared-memory bug above blocks a valid "1000 signals on wgpu" latency number until resolved.

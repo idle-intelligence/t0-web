@@ -204,5 +204,5 @@ not comparable, see `docs/BENCHMARKS.md`'s existing caveat on this).
   needed per this task's brief).
 - A true multi-signal batched kernel comparison beyond n=24 — not
   requested this session.
-- Phone/mobile timing: not exercised here — this is all "desktop" Chromium-for-Testing
-  on the M2).
+- Phone timing: every number here is desktop Chromium-for-Testing on
+  the M2.
