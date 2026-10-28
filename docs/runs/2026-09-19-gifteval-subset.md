@@ -1,7 +1,6 @@
 # GIFT-Eval subset — reference F32 vs ours F32/f16/Q8_0/Q4_0 on t0-alpha
 
-Machine: Apple M2. Another training job held the GPU
-throughout this run, so this run used the `ndarray` (CPU) backend exclusively, never `wgpu`; no wgpu numbers
+Machine: Apple M2. The GPU was not available for this run, so this run used the `ndarray` (CPU) backend exclusively, never `wgpu`; no wgpu numbers
 are reported here.
 
 ## Protocol source

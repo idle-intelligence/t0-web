@@ -4,8 +4,7 @@ Data only — analysis and strategy go in `docs/runs/`.
 
 ## Milestone 0 — numerical parity (native, F32, CPU/ndarray)
 
-- Machine: Apple M2, no GPU job running concurrently.
-- Commit: (this milestone's HEAD — see `git log`).
+- Machine: Apple M2, GPU idle.
 - Reference: `tfc-t0` (PyPI) `t0.model.model.T0Forecaster`, checkpoint `theforecastingcompany/t0-alpha`.
 - Command: `cargo run -p t0-cli --release -- parity --fixtures fixtures --weights $MODELS_DIR/hf/theforecastingcompany/t0-alpha/model.safetensors --config $MODELS_DIR/hf/theforecastingcompany/t0-alpha/config.json`
 - Fixtures: `tools/make_fixtures.py`, context 512, horizon 96, quantile levels `[0.1, 0.25, 0.5, 0.75, 0.9]` (== trained levels, no interpolation).
@@ -23,7 +22,6 @@ Analysis: `docs/runs/2026-09-19-parity.md`.
 ## Milestone 1a — GGUF quantization round-trip (native, CPU/ndarray)
 
 - Machine: Apple M2.
-- Commit: (this milestone's HEAD — see `git log`).
 - Command: `cargo test -p t0-core --release -- --ignored --nocapture gguf_round_trip_quantiles`
 - Quantized tensors: `attention.wQKV.weight`, `attention.wO.weight`, `mlp.0.weight`, `mlp.2.weight` per layer; everything else stored as f16.
 
@@ -67,8 +65,7 @@ Analysis: `docs/runs/2026-09-19-milestone1a.md`.
 ## Milestone 1a — latency table
 
 - Machine: Apple M2, 8 threads available (`std::thread::available_parallelism`).
-- Commit: (this milestone's HEAD — see `git log`).
-- GPU contention: another training job held the GPU during the first wgpu pass; numbers below are re-measured with the GPU idle (see `docs/runs/2026-09-19-milestone1a.md`).
+- GPU idle for the numbers below (a first wgpu pass under GPU contention was re-measured; see `docs/runs/2026-09-19-milestone1a.md`).
 - Command (per row): `t0-cli bench --weights <F32 safetensors | GGUF> [--config <config.json>] --backend <ndarray|wgpu> --signals <N> --context 512 --horizon 96 --reps 5` — median of 5 timed forward passes after 1 untimed warm-up.
 
 | backend | quant | signals | file MB | load+dequant s | median forward s |
@@ -98,7 +95,7 @@ Analysis: `docs/runs/2026-09-19-milestone1a.md`.
 
 ## Milestone 1a — chunked wgpu batch (native, Metal), extends the table above
 
-- Machine: Apple M2, GPU idle (no other GPU process in `ps` before each run).
+- Machine: Apple M2, GPU idle.
 - Commit: `d11f154` + this run's uncommitted changes (`forecast_batch_chunked`, `DEFAULT_BATCH_CHUNK = 16`).
 - Correctness gate: `cargo test -p t0-cli --release --no-default-features --features wgpu -- --ignored chunked_batch_of_40_equals_40_single` — 40 synthetic signals run through wgpu in chunks of 16 (3 chunks: 16+16+8) match 40 single-signal (chunk=1) forecasts to <=1e-5 max-abs. Result: **PASS**.
 - Command (per row): `t0-cli bench --weights <F32 safetensors | GGUF> [--config <config.json>] --backend wgpu --signals <N> --context 512 --horizon 96 --reps 3 --chunk 16`.
@@ -144,8 +141,8 @@ Analysis: `docs/runs/2026-09-19-milestone1a.md`.
 
 ## GIFT-Eval subset — reference F32 vs ours F32/f16/Q8_0/Q4_0, t0-alpha
 
-- Machine: Apple M2, `ndarray` (CPU) backend only; another training job held the GPU throughout this run, so no wgpu numbers are reported here.
-- Commit: c1d9183 (`cli: add gifteval subcommand...`) + this doc's commit.
+- Machine: Apple M2, `ndarray` (CPU) backend only; the GPU was not available for this run, so no wgpu numbers are reported here.
+- Commit: c1d9183 (`cli: add gifteval subcommand...`).
 - Reference: `tfc-t0` (PyPI) `T0Forecaster.predict()`, checkpoint `theforecastingcompany/t0-alpha`, scored with the official GIFT-Eval notebook's own metric call (`gluonts.model.evaluate_model` + `MASE()` + `MeanWeightedSumQuantileLoss(quantile_levels=[0.1..0.9])`).
 - Subset: 8 configs / 382 windows (stride-subsampled from 4099; see `docs/runs/2026-09-19-gifteval-subset.md`). **Deviation from the published protocol**: context capped to the trailing 512 observations for BOTH reference and ours (this port has no autoregressive rollout yet — `crates/t0-core/src/model.rs::forecast_series` is one forward pass, `max_horizon=1024`), vs the reference notebook's `CONTEXT_LENGTH=8192`. Numbers below are only comparable to each other, not to the published full-suite row.
 - Commands: `tools/gifteval_subset.py` (export) -> `t0-cli gifteval --backend ndarray --manifest fixtures/gifteval --weights <safetensors|gguf> --out-dir fixtures/gifteval/forecasts_<tag>` (forecast) -> `tools/score_gifteval.py --which <reference|f32|f16|q8_0|q4_0> --forecast-dir <dir>` (score, same gluonts call both sides).
@@ -187,7 +184,7 @@ Forecast agreement sanity (ours F32 vs reference, 9-level interpolated quantiles
 - **Q8_0**: within band on every task and the aggregate (largest MASE delta: 0.0006 on jena_weather, ~0.06%). PASS.
 - **Q4_0**: within band on 6/8 tasks; `electricity/W-FRI` (MASE +0.97%) and `saugeenday` (MASE +0.99%) exceed the 0.5% band, aggregate MASE delta +0.15% (within band). Consistent with the drift benchmark above (Q4_0 point-drift-worst 8.4%, clearly the roughest of the three quants) — CRPS stays within band everywhere (worst delta 0.9% relative on electricity/D, aggregate +0.11%). Borderline PASS on aggregate, marginal FAIL on 2/8 individual tasks.
 
-What was not run: wgpu backend (GPU held by another job for the whole run, see machine line above); the officially published 8192-context / no-subsampling / full-97-config protocol (blocked on this port's autoregressive rollout, not yet implemented); single-signal native/browser latency per quant (next section).
+What was not run: wgpu backend (see machine line above); the officially published 8192-context / no-subsampling / full-97-config protocol (blocked on this port's autoregressive rollout, not yet implemented); single-signal native/browser latency per quant (next section).
 
 Analysis: `docs/runs/2026-09-19-gifteval-subset.md`.
 
@@ -195,7 +192,7 @@ Analysis: `docs/runs/2026-09-19-gifteval-subset.md`.
 
 ### CPU (ndarray)
 
-- Machine: Apple M2, `ndarray` backend, GPU occupied by another job throughout this sub-table's run.
+- Machine: Apple M2, `ndarray` backend; another process shared the CPU during this sub-table's run, so these numbers carry extra noise (`docs/runs/2026-09-19-latency-cpu.md`).
 - Commit: `01257dc`.
 - Command: `t0-cli bench --weights <F32|GGUF> [--config config.json] --backend ndarray --signals 1 --context 512 --horizon 32 --warmup 2 --reps 10` — median of 10 after 2 warm-ups.
 
@@ -211,7 +208,7 @@ Analysis: `docs/runs/2026-09-19-latency-cpu.md`.
 ### wgpu (Metal)
 
 - Machine: Apple M2, `wgpu` backend, GPU confirmed idle for this sub-table's run.
-- Commit: this doc's commit, `t0-cli` built with `--no-default-features --features wgpu`.
+- `t0-cli` built with `--no-default-features --features wgpu`.
 - Command, cold: `t0-cli bench --weights <F32|GGUF> [--config config.json] --backend wgpu --signals 1 --context 512 --horizon 32 --warmup 0 --reps 1` (first call, includes autotune/shader compile). Warm: same with `--warmup 2 --reps 10`, median of 10.
 
 | quant | file MB | load time (s) | cold first-call (ms) | warm median forward latency (ms) |
@@ -223,7 +220,7 @@ Analysis: `docs/runs/2026-09-19-latency-cpu.md`.
 
 wgpu is slower than native ndarray CPU at this batch size (n_signals=1) — expected, per-dispatch overhead of many small unbatched GPU kernel launches dominates; wgpu only wins once batched (see the "chunked wgpu batch" table above, ~38-52 ms/signal at n=100-1000). Analysis: `docs/runs/2026-09-19-latency-wgpu.md`.
 
-**Re-measured 2026-09-20, quiet, with `burn-wgpu`'s `fusion` feature** (the 705-946 ms warm numbers above were flagged as "under contention" in the earlier run — this re-run confirms GPU idle first: `pgrep` showed only unrelated static file servers, no GPU-touching process). Same commands as above, `t0-cli` rebuilt with the fusion-enabled `Cargo.toml` (`docs/runs/2026-09-20-perf.md`):
+**Re-measured 2026-09-20, quiet, with `burn-wgpu`'s `fusion` feature** (GPU idle; the 705-946 ms warm numbers above were measured under GPU contention). Same commands as above, `t0-cli` rebuilt with the fusion-enabled `Cargo.toml` (`docs/runs/2026-09-20-perf.md`):
 
 | quant | file MB | load time (s) | cold first-call (ms) | warm median forward latency (ms) |
 |---|---|---|---|---|
@@ -252,7 +249,6 @@ Compute class: every row above runs F32 compute (dequant to F32 happens once at 
 ## Web smoke test (WASM CPU/ndarray and WebGPU, headless Chromium)
 
 - Machine: Apple M2, Playwright's bundled Chromium-for-Testing.
-- Commit: this doc's commit.
 - Series: `web/data/series.f32`, real public series `us_births` (daily US
   births, 1969-01-01 to 1988-12-31, 7305 points; GIFT-Eval `us_births/D`,
   same config as the GIFT-Eval subset table above) — replaces the earlier
@@ -339,8 +335,8 @@ Analysis and exact commands: `docs/runs/2026-09-20-head-to-head.md`.
 
 ## Beta (curiosity row) — parity, sizes, drift, official-protocol subset
 
-- Machine: Apple M2, `ndarray` (CPU) backend throughout (native cargo build + Python reference, no GPU job).
-- Commit: `a6b7b08` + this doc's commit.
+- Machine: Apple M2, `ndarray` (CPU) backend throughout (native cargo build + Python reference).
+- Commit: `a6b7b08`.
 - Checkpoint: `theforecastingcompany/t0-beta` (HF, Apache-2.0, not gated), `hf download` into `$MODELS_DIR/hf/theforecastingcompany/t0-beta` (config.json 478 bytes, `model.safetensors` 1,022,492,908 bytes / 1022.5 MB). Config vs t0-alpha: `embed_dim` 1024 (alpha 512), `scaler_eps` 0.01 + `scaler_eps_mode` "std_clamp" (alpha's defaults: 0.1 / "variance_offset"), `quantile_levels` 21 levels 0.01..0.99 (alpha: 5, 0.1..0.9); `num_layers` 24, `group_every_n` 3, `num_heads` 8, `mlp_hidden_dim` 2048, `patch_size` 32 — identical to alpha. No new ops: every differing field (`embed_dim`, `scaler_eps`, `scaler_eps_mode`, `quantile_levels`) is already a config-driven path in `crates/t0-core` (`config.rs`, `scaler.rs` already implements both `variance_offset` and `std_clamp`), so beta is a pure weights+config swap through the same `T0Model`/`Weights`/CLI.
 
 ### Parity (native, F32, CPU/ndarray)
@@ -407,7 +403,7 @@ Commands, full timing breakdown per config: `docs/runs/2026-09-20-beta.md`.
 ## Beta on t0-fast (WGSL/raw-wgpu engine, native)
 
 - Machine: Apple M2, Apple Metal via raw `wgpu`
-  (`crates/t0-fast`, not Burn), no other GPU job running. Commit `f99e3bb`
+  (`crates/t0-fast`, not Burn), GPU idle. Commit `f99e3bb`
   (fixed a `HEAD_DIM=64` hardcode in `crates/t0-fast` that previously
   blocked beta entirely — see `docs/runs/2026-09-20-beta-fast.md`).
 - Command shape: `t0-cli bench --backend fast --fast-quant <q8_0|q4_0>

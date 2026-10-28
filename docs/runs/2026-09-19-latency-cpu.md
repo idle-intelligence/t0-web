@@ -2,11 +2,10 @@
 
 - Machine: Apple M2, 8 threads available (`std::thread::available_parallelism`).
 - Commit: `01257dc` (`cli: add --warmup flag to bench`).
-- GPU: occupied by another training job throughout this run, so no
-  wgpu/Metal/WebGPU measurement was taken; ndarray (CPU) backend only.
-  That job also used the CPU (data loading, optimizer step), sharing the
-  same 8 logical cores as this CPU-only bench, so these numbers carry more run-to-run noise than an
-  idle-machine measurement would; the per-quant *ranking* is still the
+- ndarray (CPU) backend only; the GPU was not available for this run.
+  Another process shared the same 8 logical cores as this CPU-only bench,
+  so these numbers carry more run-to-run noise than an idle-machine
+  measurement would; the per-quant *ranking* is still the
   signal of interest, not the absolute ms.
 - Command (per row): `t0-cli bench --weights <F32 safetensors | GGUF> [--config config.json] --backend ndarray --signals 1 --context 512 --horizon 32 --warmup 2 --reps 10` — median of 10 timed forward passes after 2 untimed warm-ups.
 - Weights: `../models/hf/theforecastingcompany/t0-alpha/{model.safetensors,config.json}` (F32); `/tmp/t0-alpha-{f16,q8_0,q4_0}.gguf` (already exported this run via `t0-cli export-gguf`, config embedded in the GGUF).
@@ -31,11 +30,10 @@ n=1 signal, consistent with the wgpu chunked-batch finding already logged
 in `docs/BENCHMARKS.md` (compute stays F32 regardless of storage quant —
 dequant happens once at load, not per forward pass) and with the
 CPU-timing-noise finding in `docs/runs/2026-09-19-milestone1a.md`; here
-that noise is compounded by the other job's concurrent CPU use. F32 reads as
+that noise is compounded by the concurrent CPU use. F32 reads as
 fastest median only because its first few reps happened to land in a
 quieter window — not read as a genuine quant-dependent speedup.
 
 ## Browser / WebGPU
 
-Pending: the GPU was busy with another job.
-Marked "pending (GPU busy)" in `docs/BENCHMARKS.md`.
+Not measured in this run; the wgpu numbers are in `docs/runs/2026-09-19-latency-wgpu.md`.

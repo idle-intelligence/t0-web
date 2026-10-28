@@ -1,10 +1,8 @@
 # Single-signal native wgpu (Metal) latency, per quant
 
 - Machine: Apple M2, `wgpu` backend (`burn-wgpu`, Metal).
-  No other GPU job ran during the whole run covered by this doc, and no
-  other local `cargo`/`rustc` build was running while these numbers were
-  taken.
-- Commit: this doc's commit, `t0-cli` built with
+  GPU idle, no local build running.
+- `t0-cli` built with
   `cargo build -p t0-cli --release --no-default-features --features wgpu`.
 - Weights: `../models/hf/theforecastingcompany/t0-alpha/{model.safetensors,config.json}`
   (F32); `/tmp/t0-alpha-{f16,q8_0,q4_0}.gguf` (config embedded, from this

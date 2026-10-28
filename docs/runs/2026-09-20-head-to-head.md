@@ -1,10 +1,7 @@
 # Head-to-head: official t0-alpha ONNX INT8 export vs ours (same browser, same machine)
 
-- Machine: Apple M2. GPU rule checked before every run:
-  `pgrep -f 'cargo (build|test)|wasm-pack|rustc'`; one unrelated native
-  release build was compiling during the wasm-pack builds below (compile-only, no GPU device touched); no other process held
-  the GPU device during any headless run (webgpu bench calls run
-  sequentially, one at a time, never concurrently).
+- Machine: Apple M2, GPU idle during every headless run (bench calls run
+  sequentially, one at a time).
 - Commit: `09a7ed9` + this run's changes (`t0-cli forecast-raw`,
   `t0_core::forecast_batch_chunked_async`, `T0Wasm::forecastBatch`).
 - Harness: two browser bench pages (one per engine) and their headless

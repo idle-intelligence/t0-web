@@ -36,11 +36,11 @@ No environment variable or public API was found in `cubek-matmul` 0.1.1 to force
 
 ## GPU contention
 
-Another training job held the GPU during the first wgpu bench pass (checked with `ps` before each run). It finished before this doc was written; re-measuring with the GPU idle gave numbers within noise of the contended pass (e.g. F32 n=1: 0.2226s contended vs 0.2232s idle). The idle numbers are what's reported in `docs/BENCHMARKS.md`.
+The GPU was busy during the first wgpu bench pass; re-measuring with the GPU idle gave numbers within noise of the contended pass (e.g. F32 n=1: 0.2226s contended vs 0.2232s idle). The idle numbers are what's reported in `docs/BENCHMARKS.md`.
 
 ## CPU timing noise
 
-n=1000 ndarray medians have wide spread across the 5 reps (e.g. F32: 106.0s-135.4s) — consistent with thermal/scheduling noise on a fanless M2 under a sustained ~100s single-threaded-per-op run, not a quant-dependent effect. Runtime is near-flat across f16/Q8_0/Q4_0 at both n=1 and n=1000 because compute stays F32 regardless of storage quantization (see "GGUF container and quantization" above) — the quant ladder saves file size and load time, not per-step compute this milestone.
+n=1000 ndarray medians have wide spread across the 5 reps (e.g. F32: 106.0s-135.4s) — consistent with thermal/scheduling noise on the M2 under a sustained ~100s single-threaded-per-op run, not a quant-dependent effect. Runtime is near-flat across f16/Q8_0/Q4_0 at both n=1 and n=1000 because compute stays F32 regardless of storage quantization (see "GGUF container and quantization" above) — the quant ladder saves file size and load time, not per-step compute this milestone.
 
 ## Chunked batch: the workaround for the shared-memory bug above
 
