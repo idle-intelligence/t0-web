@@ -5,9 +5,7 @@
 // resident t0-fast (Q8_0/Q4_0, crates/t0-wasm/pkg-fast). Both engines load
 // in this same tab so the numbers are for whatever machine opens this page.
 //
-// Driven either by the UI (run button) or headlessly via window.__app.run(),
-// per this repo's rule of driving the demo through a small API rather than
-// DOM clicks in Playwright.
+// Driven either by the UI (run button) or headlessly via window.__app.run().
 
 // The onnxruntime-web version the official INT8 export's manifest.json
 // names.
@@ -345,12 +343,12 @@ function renderBatchTable(rows) {
 // computeAgreement() result. Three rows per quantile (plus overall): the
 // 1e-6-scale row (ours vs the true F32 reference) sits next to the
 // quantized-vs-quantized rows so the two error sources aren't conflated.
-const AGREE_NOTE = 'The 1e-6 parity is the II engine against the F32 reference with identical weights; the difference between the two quantized models is the sum of the two quantization errors.';
-const AGREE_NOTE_NO_F32 = 'F32 reference rows need the "F32 reference" opt-in above (adds a 407 MB download); showing TFC (INT8) vs II (quantized) only.';
+const AGREE_NOTE = 'The 1e-6 parity is t0-fast against the F32 reference with identical weights; the difference between the two quantized models is the sum of the two quantization errors.';
+const AGREE_NOTE_NO_F32 = 'F32 reference rows need the "F32 reference" opt-in above (adds a 407 MB download); showing the t0 ONNX INT8 export vs t0-fast only.';
 const AGREE_COMPARISONS = [
-    ['theirsVsOurs', 'TFC (INT8) vs II (quantized)'],
-    ['oursVsF32', 'II (quantized) vs F32 reference'],
-    ['theirsVsF32', 'TFC (INT8) vs F32 reference'],
+    ['theirsVsOurs', 't0 ONNX INT8 export vs t0-fast'],
+    ['oursVsF32', 't0-fast vs F32 reference'],
+    ['theirsVsF32', 't0 ONNX INT8 export vs F32 reference'],
 ];
 
 function renderAgreementTable(agreement) {
@@ -460,10 +458,10 @@ async function run(overrideConfig) {
         const series = await loadFixtureSeries();
         const context = cfg.usePasted ? contextFromPasted(cfg.context) : series.slice(ORIGIN - cfg.context, ORIGIN);
 
-        setStatus('loading', 'loading the TFC ONNX INT8 model...');
+        setStatus('loading', 'loading the t0 ONNX INT8 export...');
         const theirs = await loadOnnx();
 
-        setStatus('loading', 'loading the II engine (' + cfg.quant + ')...');
+        setStatus('loading', 'loading t0-fast (' + cfg.quant + ')...');
         const ours = await loadOurs(cfg.quant);
 
         let f32Model = null;
@@ -508,9 +506,9 @@ async function run(overrideConfig) {
         const batchNote = cfg.usePasted ? 'same window x24 (no history to shift)' : '24 distinct shifted windows (stride 1 day)';
         try {
             const { ms } = await onnxRun(theirs.session, rows, cfg.context, cfg.horizon);
-            batchRows.push({ engine: 'TFC (ONNX)', msTotal: ms, msPerSignal: ms / N_BATCH, note: batchNote });
+            batchRows.push({ engine: 't0 ONNX INT8 export', msTotal: ms, msPerSignal: ms / N_BATCH, note: batchNote });
         } catch (e) {
-            batchRows.push({ engine: 'TFC (ONNX)', error: e.message || String(e) });
+            batchRows.push({ engine: 't0 ONNX INT8 export', error: e.message || String(e) });
         }
         let rowParityMaxAbs = null;
         let rowParityRange = null;
@@ -522,17 +520,14 @@ async function run(overrideConfig) {
             const t0 = performance.now();
             const batchOut = await ours.model.forecastBatchRows(concatRows, lengths, cfg.horizon);
             const ms = performance.now() - t0;
-            batchRows.push({ engine: 'II (t0-fast)', msTotal: ms, msPerSignal: ms / N_BATCH, note: batchNote });
+            batchRows.push({ engine: 't0-fast', msTotal: ms, msPerSignal: ms / N_BATCH, note: batchNote });
 
             // Headless parity gate: every row of forecastBatchRows must
             // equal that row's own single-signal forecast() to within a
             // *relative* tolerance -- max-abs diff / (max-min) of this
             // window's own full quantile-grid range, not an absolute
-            // epsilon. An absolute 1e-4 gate was previously calibrated
-            // against a small-magnitude synthetic fixture (values in
-            // [-1, 1]) and falsely failed real-world thousands-magnitude
-            // data (see docs/runs/2026-09-20-compare-page.md): the same
-            // 0.001953125 absolute diff is ~1e-6 relative there.
+            // epsilon: on data in the thousands, float32 rounding alone
+            // gives absolute diffs around 1e-3 (~1e-6 relative).
             setStatus('generating', 'checking the batch path against single forecasts...');
             const perRow = cfg.horizon * NQ;
             let maxAbs = 0;
@@ -555,7 +550,7 @@ async function run(overrideConfig) {
                 );
             }
         } catch (e) {
-            batchRows.push({ engine: 'II (t0-fast)', error: e.message || String(e) });
+            batchRows.push({ engine: 't0-fast', error: e.message || String(e) });
         }
 
         // agreement: computeHorizon on theirs side may exceed cfg.horizon
@@ -578,12 +573,12 @@ async function run(overrideConfig) {
 
         const latencyRows = [
             {
-                engine: 'TFC (ONNX INT8)', ep: theirs.ep,
+                engine: 't0 ONNX INT8 export', ep: theirs.ep,
                 downloadMB: theirs.sizeBytes / 1e6,
                 setup: theirsSetup.ms, cold: theirsCold.ms, warmMedian: median(theirsTimes), warmP90: p90(theirsTimes),
             },
             {
-                engine: `II (t0-fast ${cfg.quant})`, ep: ours.ep,
+                engine: `t0-fast ${cfg.quant}`, ep: ours.ep,
                 downloadMB: ours.sizeBytes / 1e6,
                 setup: oursSetup.ms, cold: oursCold.ms, warmMedian: median(oursTimes), warmP90: p90(oursTimes),
             },

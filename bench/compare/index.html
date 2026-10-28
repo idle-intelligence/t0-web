@@ -267,8 +267,8 @@
     <p class="org"><img src="../../web/apple-touch-icon.png" alt="II">idle intelligence</p>
     <h1>t0-web compare</h1>
     <p class="tagline">
-        The Forecasting Company (TFC) t0-alpha ONNX INT8 export, run by onnxruntime-web
-        (WebGPU with wasm fallback), next to the idle intelligence (II) t0-fast engine
+        The Forecasting Company's t0-alpha ONNX INT8 export, run by onnxruntime-web
+        (WebGPU with wasm fallback), next to the idle intelligence t0-fast engine
         on GGUF weights (Q8_0/Q4_0), both loaded live in this tab.
         A run downloads one ONNX file and one GGUF: about 210 MB with Q8_0, 160 MB
         with Q4_0. Turning on the F32 reference below adds the never-quantized
@@ -283,7 +283,7 @@
     <h2>settings <span class="sub">· run</span></h2>
     <label>context / horizon</label>
     <div class="model-selector" id="chChoices"></div>
-    <label>II quantization</label>
+    <label>t0-fast quantization</label>
     <div class="model-selector" id="quantChoices"></div>
     <label>series</label>
     <div class="model-selector" id="seriesChoices"></div>
@@ -307,8 +307,8 @@
     <h2>output <span class="sub">· forecasts</span></h2>
     <canvas id="overlayChart" class="io-chart"></canvas>
     <div class="legend">
-        <span><span class="swatch-line swatch-tfc"></span>TFC (median, Q10-Q90)</span>
-        <span><span class="swatch-line swatch-ii"></span>II (median, Q10-Q90)</span>
+        <span><span class="swatch-line swatch-tfc"></span>t0 ONNX INT8 export (median, Q10-Q90)</span>
+        <span><span class="swatch-line swatch-ii"></span>t0-fast (median, Q10-Q90)</span>
     </div>
 </section>
 
