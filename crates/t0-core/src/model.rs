@@ -1,9 +1,9 @@
 //! `t0.model.model.T0Forecaster` / `t0.model.layers.transformer.Transformer`
 //! assembled from `ops.rs` primitives, plus the single-window predict driver
 //! (`t0.model.rollout.RolloutManager.predict_step`, restricted to
-//! `prediction_length <= max_horizon` — no autoregressive rollout, which is
-//! all three of this milestone's fixtures need; see
-//! `docs/reports/t0-alpha.md` §5).
+//! `prediction_length <= max_horizon` — no autoregressive rollout, which
+//! none of the three parity fixtures need; `forecast_rollout` below covers
+//! longer horizons).
 
 use anyhow::Result;
 use burn::tensor::backend::Backend;
@@ -318,8 +318,7 @@ fn gather_rows<B: Backend>(table: Tensor<B, 2>, idx: &[i64], device: &B::Device)
 /// fixture in this milestone). Mirrors
 /// `RolloutManager.{prepare_rollout_buffer,predict_step}` with
 /// `query_quantile_levels == model.head.quantile_levels` (so
-/// `interpolate_quantiles` is the identity — see
-/// `docs/reports/t0-alpha.md` §5 and `t0/quantile.py`).
+/// `interpolate_quantiles` is the identity — see `t0/quantile.py`).
 pub fn forecast<B: Backend>(
     model: &T0Model<B>,
     context: &[f32],

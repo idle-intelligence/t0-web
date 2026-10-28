@@ -297,9 +297,8 @@ impl GpuModel {
     /// else (patch encoder, decoder, norms, type embeddings) is F16 on
     /// disk regardless of `--quant` and is dequantized to f32 here, same
     /// as `Weights::load_gguf_bytes` -- those tensors are tiny and always
-    /// F32-resident on the GPU (see `load`'s doc comment / `docs/reports/
-    /// t0-alpha.md` §5 on why: they gate output precision, not worth
-    /// quantizing).
+    /// F32-resident on the GPU (see `load`'s doc comment on why: they gate
+    /// output precision, not worth quantizing).
     pub fn load_from_gguf_bytes(engine: &Engine, gguf_bytes: &[u8]) -> Result<Self> {
         let file = t0_core::gguf::read_gguf(&mut &gguf_bytes[..]).context("parsing gguf")?;
         let config = t0_core::weights::config_from_gguf_metadata(&file.metadata)?;

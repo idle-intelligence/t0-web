@@ -28,7 +28,7 @@ pub struct Weights {
 /// quantile levels) stays f16: those tensors are either tiny (norms, the
 /// quantile-level constant) or directly gate output precision (patch
 /// encoder feeds every downstream layer; the decoder produces the quantile
-/// values themselves) — see `docs/reports/t0-alpha.md` §5.
+/// values themselves). The README's "Quantization" section lists them.
 fn is_quantizable(name: &str) -> bool {
     name.contains(".attention.wQKV.weight")
         || name.contains(".attention.wO.weight")
