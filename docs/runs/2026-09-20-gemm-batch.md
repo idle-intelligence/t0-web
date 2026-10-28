@@ -87,13 +87,12 @@ immediately once regression was clear):
 
 ## Not attempted this run
 
-`dot4I8Packed` (the plan's optional item 3): skipped given the above --
+`dot4I8Packed` (packed INT8 dot products): skipped given the above --
 two independent attempts at "more compute per dispatch" both regressed on
 this hardware/workload, and `dot4I8Packed` is the same category of change
 (more arithmetic intensity per instruction, not more concurrent work), so
 it carries the same regression risk without new evidence it would land
-differently. Fused bias+residual epilogue (the plan's item 2 fusion
-note): not attempted -- `residual_block`/`mhsa`/`swiglu_ffn`'s
+differently. Fused bias+residual epilogue: not attempted -- `residual_block`/`mhsa`/`swiglu_ffn`'s
 `add_inplace` calls after `linear()` would need a new residual-buffer
 binding threaded through both `LinearDims`/`LinearQDims` and every
 pipeline's bind-group layout, a larger and riskier change than this
@@ -112,7 +111,7 @@ Q8_0/Q4_0-vs-Burn). `cargo clippy -p t0-fast -p t0-cli -p t0-core
 --release --no-default-features --features fast,ndarray -- -D warnings`
 clean; `wasm-pack build crates/t0-wasm --target web --out-dir pkg-fast
 --release --no-default-features --features fast` builds clean (not
-copied anywhere, per the plan). Batch-24 remains at this repo's
+copied into any page). Batch-24 remains at this repo's
 prior best (~11.2ms/signal in the browser per
 `docs/runs/2026-09-20-perf.md`'s sixth run, ~22.7-23.3ms/signal
 native -- the native/browser gap itself is the open question that doc

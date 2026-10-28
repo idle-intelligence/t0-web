@@ -36,7 +36,7 @@ are reported here.
 ## Subset (8 configs, term=short only)
 
 Chosen for small download (`fixtures/gifteval/` is 33 MB, well under the
-200 MB budget), domain coverage (weather/energy/traffic, per the plan, plus
+200 MB budget), domain coverage (weather/energy/traffic, plus
 two small clean sanity baselines), and univariate-or-few-variate targets
 (so t0-alpha's forward pass, and this port, forecast every series
 independently — no multivariate joint-attention path exercised here):
@@ -61,7 +61,7 @@ Rejected for this subset: everything at sub-hourly frequency (`15T`, `10T`,
 `5T`) — `electricity/15T` alone is 208 MB, `LOOP_SEATTLE/5T` 136 MB, both
 blow the download budget on their own; `m4_*`/`hospital`/`covid_deaths`
 (econ/healthcare, already have two non-weather/energy/traffic baselines);
-medium/long terms (the plan said short-horizon).
+medium/long terms (this subset is short-horizon only).
 
 ## Deviation from the published protocol: context length
 

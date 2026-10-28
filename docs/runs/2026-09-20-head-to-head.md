@@ -146,7 +146,7 @@ bug in `t0-cli forecast-raw` or the ONNX harness; a bug in the one-off
 Node comparison script, caught by the values-should-roughly-agree sanity
 check before trusting the number.
 
-## 54-case drift benchmark, for context (from `docs/BENCHMARKS.md`, already run this weekend)
+## 54-case drift benchmark, for context (from `docs/BENCHMARKS.md`)
 
 This is our own case generator (their generator isn't published, see
 `docs/reports/t0-published-numbers.md`), t0-alpha weights, drift formula
@@ -184,9 +184,8 @@ not comparable, see `docs/BENCHMARKS.md`'s existing caveat on this).
 
 ## What this doesn't cover
 
-- WASM-only fallback timing for their export (WebGPU ran, so no comparison
-  needed per the plan).
-- A true multi-signal batched kernel comparison beyond n=24 — not
-  requested this run.
+- WASM-only fallback timing for their export (WebGPU ran, so it was not
+  needed).
+- A true multi-signal batched kernel comparison beyond n=24.
 - Phone timing: every number here is desktop Chromium-for-Testing on
   the M2.
