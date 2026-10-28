@@ -15,11 +15,11 @@ per-row parity check, and a three-way median/Q10-Q90 agreement diff
 (theirs-vs-ours, ours-vs-F32, theirs-vs-F32). Fixture series (`us_births`,
 same as `bench/onnx`/`bench/ours`), context/horizon 512/32, ours at Q8_0.
 
-- Machine: Apple M2 (Darwin 25.3.0), hot/sluggish tonight — **no
+- Machine: Apple M2 (Darwin 25.3.0), under thermal load: **no
   latency numbers from this run**; only the timing-independent
   correctness numbers below were captured. Latency/batch ms rerun is
   pending a cold machine.
-- Commit: this session's `bench/compare/`, `crates/t0-fast`,
+- Commit: this run's `bench/compare/`, `crates/t0-fast`,
   `crates/t0-wasm`, `crates/t0-core`, `scripts/headless/run_compare_bench.mjs`
   (see git log around this doc's commit).
 - Browser: Playwright's bundled Chromium-for-Testing (`chromium-1243`),
@@ -30,9 +30,9 @@ same as `bench/onnx`/`bench/ours`), context/horizon 512/32, ours at Q8_0.
 
 ## Latency / Batch 24
 
-**Pending, cold-machine run.** The laptop was hot and sluggish for this
-session; ms numbers from tonight's run would not be representative and
-are not recorded here. Re-run needed:
+**Pending, cold-machine run.** The machine was under thermal load for
+this run; ms numbers from it would not be representative and are not
+recorded here. Re-run needed:
 
 | engine | warm ms | batch-24 ms/signal |
 |---|---|---|
@@ -61,7 +61,7 @@ absolute epsilon in the 1e-3 range) — this repo's existing native
 `chunk_wgpu.rs` batch-vs-single test allows 1e-5 absolute at its
 fixture's ~1-magnitude data, which scales to the same order as this
 result once magnitude is accounted for. The 1e-4 absolute threshold this
-session picked was calibrated against a small-magnitude synthetic fixture
+run picked was calibrated against a small-magnitude synthetic fixture
 (`crates/t0-fast/tests/batch_rows.rs`, values in `[-1, 1]`) and is not the
 right absolute bound for real-world-magnitude data; a relative or
 magnitude-scaled threshold is the correct follow-up, not a code fix to
@@ -114,22 +114,22 @@ When the F32 model's first forward call reuses the exact same
 hits the cache with the *previous* (Q8_0-built) `wgpu::BindGroup` — which
 is bound to Q8_0's actual weight buffers and Q8_0's compute pipeline
 layout, not F32's — regardless of the fresh `entries` the F32 call
-constructs. This predates this session's F32 work (the bug is in shared
-`pool.rs`/`model.rs` code), but this session's `T0Wasm::loadF32` addition
+constructs. This predates this run's F32 work (the bug is in shared
+`pool.rs`/`model.rs` code), but this run's `T0Wasm::loadF32` addition
 is the first caller in this codebase's history to run two differently-
 quantized `GpuModel`s against one shared `Engine`, so it's the first
 thing to expose it. Fix is architectural (give each `GpuModel` its own
 `Pool`, or fold weight-buffer/quant-type identity into the bind-group
-cache key) and was not attempted in this session — flagged here rather
+cache key) and was not attempted in this run — flagged here rather
 than shipped as a false "our engine differs from F32 by 72%" number.
 
 Gate: theirs-vs-ours passed (0.883% < 1%); forecastBatchRows row parity
-failed the session's 1e-4 absolute threshold (see above, read as a
+failed the run's 1e-4 absolute threshold (see above, read as a
 threshold-calibration issue, not a functional bug); ours-vs-F32 and
 theirs-vs-F32 are blocked on the Pool-sharing bug above and are not
 gated this run.
 
-## Fixed in 89080e8 / 453e1d1 / follow-up session
+## Fixed in 89080e8 / 453e1d1 / follow-up run
 
 Both follow-ups from this doc's priority list are done: `89080e8` gives
 every `GpuModel` its own `Pool` (Engine's device/queue/pipelines stay
@@ -175,11 +175,11 @@ range.
 ## Notes
 
 - Prior run's batch-24 caveat (ours replicated one context 24x via
-  `forecastBatch`, not a true batch) is resolved this session:
+  `forecastBatch`, not a true batch) is resolved this run:
   `forecastBatchRows` gives 24 genuinely distinct shifted windows on both
   engines now. Latency numbers for the fixed batch path are pending the
   cold-machine rerun noted above.
-- Follow-ups for a future session, in priority order: (1) fix the
+- Follow-ups for a future run, in priority order: (1) fix the
   `Pool`-sharing bug above so the F32-reference agreement rows are
   trustworthy, (2) re-run latency/batch-24 on a cold machine, (3) revisit
   the `forecastBatchRows` parity threshold (absolute 1e-4 -> relative or

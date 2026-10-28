@@ -68,7 +68,7 @@ Analysis: `docs/runs/2026-09-19-milestone1a.md`.
 
 - Machine: Apple M2 (Darwin 25.3.0), 8 threads available (`std::thread::available_parallelism`).
 - Commit: (this milestone's HEAD — see `git log`).
-- GPU contention: a `jacobi2000` run held the GPU during the first wgpu pass; numbers below are re-measured with the GPU idle (see `docs/runs/2026-09-19-milestone1a.md`).
+- GPU contention: another training job held the GPU during the first wgpu pass; numbers below are re-measured with the GPU idle (see `docs/runs/2026-09-19-milestone1a.md`).
 - Command (per row): `t0-cli bench --weights <F32 safetensors | GGUF> [--config <config.json>] --backend <ndarray|wgpu> --signals <N> --context 512 --horizon 96 --reps 5` — median of 5 timed forward passes after 1 untimed warm-up.
 
 | backend | quant | signals | file MB | load+dequant s | median forward s |
@@ -98,7 +98,7 @@ Analysis: `docs/runs/2026-09-19-milestone1a.md`.
 
 ## Milestone 1a — chunked wgpu batch (native, Metal), extends the table above
 
-- Machine: Apple M2 (Darwin 25.3.0), GPU idle (`ps -A -o comm | grep -E 'target/release/(jacobi|llm-life)'` empty before each run).
+- Machine: Apple M2 (Darwin 25.3.0), GPU idle (no other GPU process in `ps` before each run).
 - Commit: `d11f154` + this run's uncommitted changes (`forecast_batch_chunked`, `DEFAULT_BATCH_CHUNK = 16`).
 - Correctness gate: `cargo test -p t0-cli --release --no-default-features --features wgpu -- --ignored chunked_batch_of_40_equals_40_single` — 40 synthetic signals run through wgpu in chunks of 16 (3 chunks: 16+16+8) match 40 single-signal (chunk=1) forecasts to <=1e-5 max-abs. Result: **PASS**.
 - Command (per row): `t0-cli bench --weights <F32 safetensors | GGUF> [--config <config.json>] --backend wgpu --signals <N> --context 512 --horizon 96 --reps 3 --chunk 16`.
@@ -118,7 +118,7 @@ Per-signal ms is flat (~38ms) at n=100 across all quant schemes (compute stays F
 
 Analysis and the upstream cubek-matmul issue note: `docs/runs/2026-09-19-milestone1a.md`.
 
-## Milestone 1a+ — drift benchmark, apples to apples with the published INT8 card
+## Milestone 1a+ — drift benchmark: our t0-alpha quantizations next to the published t0-beta INT8 card
 
 - Machine: Apple M2 (Darwin 25.3.0), ndarray backend (drift is a numerics check, not a wgpu benchmark — the CLI's `drift` subcommand has no `--backend` flag, see `docs/runs/2026-09-19-milestone1a.md`).
 - Commit: this run's uncommitted changes (`t0-cli drift`, `Weights::quantize_int8_theirs`, `gguf::int8_per_channel_roundtrip`).
@@ -134,7 +134,7 @@ Analysis and the upstream cubek-matmul issue note: `docs/runs/2026-09-19-milesto
 | int8-theirs (per-channel INT8, 96 matmuls; 6 I/O projections FP32) | 0.8494 | 0.1774 | 2.0400 | 0.6083 | 103.3 (estimated, no file written) |
 | **their published t0-beta INT8** (`t0-beta-onnx-int8`, different checkpoint: t0-beta not t0-alpha, different case generator) | **0.2271** | — | **9.393** | — | 269.1 |
 
-Their number is for **t0-beta** (256M params, embed_dim 1024); ours here is **t0-alpha** (102M params, embed_dim 512) — the two checkpoints are not architecture-identical (see `docs/reports/t0-published-numbers.md`), so this is not yet a same-model apples-to-apples row; it is the closest available until t0-beta is ported (GOAL.md's open question on which checkpoint to claim against). `int8-theirs` (their recipe, our checkpoint, our case generator) is our best current apples-to-apples proxy for the *recipe*: worst-case mean drift 0.8494% is above their 0.2271% but with a different model size and a different (undocumented, hence reconstructed) case generator, so this gap should not be read as "our INT8 recipe is worse" — it may equally reflect t0-alpha's smaller embed_dim (512 vs 1024) being more sensitive to per-channel quantization, or a harder case distribution. Q4_0 clearly exceeds their 2%/10% acceptance gates; Q8_0 and int8-theirs are within both gates; f16 is far inside both.
+Their number is for **t0-beta** (256M params, embed_dim 1024); ours here is **t0-alpha** (102M params, embed_dim 512) — the two checkpoints are not architecture-identical (see `docs/reports/t0-published-numbers.md`), so this is not yet a same-model apples-to-apples row; it is the closest available until t0-beta is ported (the same-model beta rows are in the Beta section below). `int8-theirs` (their recipe, our checkpoint, our case generator) is our best current apples-to-apples proxy for the *recipe*: worst-case mean drift 0.8494% is above their 0.2271% but with a different model size and a different (undocumented, hence reconstructed) case generator, so this gap should not be read as "our INT8 recipe is worse" — it may equally reflect t0-alpha's smaller embed_dim (512 vs 1024) being more sensitive to per-channel quantization, or a harder case distribution. Q4_0 clearly exceeds their 2%/10% acceptance gates; Q8_0 and int8-theirs are within both gates; f16 is far inside both.
 
 **Compute class**: their published `t0-alpha-onnx-int8` card states, verbatim, **"INT8-weight, FP32-compute"** (`docs/reports/t0-published-numbers.md`) — same compute precision as our Q8_0 (INT8-class weights, F32 compute throughout the forward pass, dequant happens once at load). The Q8_0-vs-`int8-theirs` drift row above (0.53%/1.78% vs 0.85%/2.04%, both against our F32 reference, same checkpoint) is therefore apples to apples on compute, not just on the quantization recipe.
 
@@ -142,7 +142,7 @@ Analysis: `docs/runs/2026-09-19-milestone1a.md`.
 
 ## GIFT-Eval subset — reference F32 vs ours F32/f16/Q8_0/Q4_0, t0-alpha
 
-- Machine: Apple M2 (Darwin 25.3.0), `ndarray` (CPU) backend only — `llm-life` (another repo's fine-tune) held the GPU throughout this run, so no wgpu numbers are reported here.
+- Machine: Apple M2 (Darwin 25.3.0), `ndarray` (CPU) backend only; another training job held the GPU throughout this run, so no wgpu numbers are reported here.
 - Commit: c1d9183 (`cli: add gifteval subcommand...`) + this doc's commit.
 - Reference: `tfc-t0` (PyPI) `T0Forecaster.predict()`, checkpoint `theforecastingcompany/t0-alpha`, scored with the official GIFT-Eval notebook's own metric call (`gluonts.model.evaluate_model` + `MASE()` + `MeanWeightedSumQuantileLoss(quantile_levels=[0.1..0.9])`).
 - Subset: 8 configs / 382 windows (stride-subsampled from 4099; see `docs/runs/2026-09-19-gifteval-subset.md`). **Deviation from the published protocol**: context capped to the trailing 512 observations for BOTH reference and ours (this port has no autoregressive rollout yet — `crates/t0-core/src/model.rs::forecast_series` is one forward pass, `max_horizon=1024`), vs the reference notebook's `CONTEXT_LENGTH=8192`. Numbers below are only comparable to each other, not to the published full-suite row.
@@ -180,12 +180,12 @@ Forecast agreement sanity (ours F32 vs reference, 9-level interpolated quantiles
 
 **Published full-suite numbers for context only, NOT a comparison target for this table** (`docs/reports/t0-published-numbers.md`): GIFT-Eval CRPS 0.4941 / MASE 0.7240 (97 configs, `CONTEXT_LENGTH=8192`, no rollout cap, no subsampling). This subset's absolute CRPS/MASE are far from those numbers because it's a different (smaller, energy/traffic-heavy) task mix at 512-step context, not because of any quant or implementation defect — the reference-vs-ours agreement above is the number that matters for "does quantization hurt."
 
-**Verdict per quant** (band: reference F32 ± 0.5%, this doc's assumed noise band per GOAL.md — no repeated-seed reference run was done to measure actual noise, since `T0Forecaster.predict()` is deterministic in eval mode and there's no RNG to reseed):
+**Verdict per quant** (band: reference F32 ± 0.5%, this doc's assumed noise band; no repeated-seed reference run was done to measure actual noise, since `T0Forecaster.predict()` is deterministic in eval mode and there's no RNG to reseed):
 - **f16**: within band on every task and the aggregate (largest CRPS delta: 0.0000, largest MASE delta: 0.0003 on jena_weather, ~0.03%). PASS.
 - **Q8_0**: within band on every task and the aggregate (largest MASE delta: 0.0006 on jena_weather, ~0.06%). PASS.
 - **Q4_0**: within band on 6/8 tasks; `electricity/W-FRI` (MASE +0.97%) and `saugeenday` (MASE +0.99%) exceed the 0.5% band, aggregate MASE delta +0.15% (within band). Consistent with the drift benchmark above (Q4_0 point-drift-worst 8.4%, clearly the roughest of the three quants) — CRPS stays within band everywhere (worst delta 0.9% relative on electricity/D, aggregate +0.11%). Borderline PASS on aggregate, marginal FAIL on 2/8 individual tasks.
 
-What was not run: wgpu backend (GPU contended by `llm-life` all session — see machine line above); the officially published 8192-context / no-subsampling / full-97-config protocol (blocked on this port's autoregressive rollout, not yet implemented); single-signal native/browser latency per quant (GOAL.md's next item).
+What was not run: wgpu backend (GPU held by another job for the whole run, see machine line above); the officially published 8192-context / no-subsampling / full-97-config protocol (blocked on this port's autoregressive rollout, not yet implemented); single-signal native/browser latency per quant (next section).
 
 Analysis: `docs/runs/2026-09-19-gifteval-subset.md`.
 
@@ -193,7 +193,7 @@ Analysis: `docs/runs/2026-09-19-gifteval-subset.md`.
 
 ### CPU (ndarray)
 
-- Machine: Apple M2 (Darwin 25.3.0), `ndarray` backend, GPU occupied by `llm-life train-a` throughout this sub-table's run.
+- Machine: Apple M2 (Darwin 25.3.0), `ndarray` backend, GPU occupied by another job throughout this sub-table's run.
 - Commit: `01257dc`.
 - Command: `t0-cli bench --weights <F32|GGUF> [--config config.json] --backend ndarray --signals 1 --context 512 --horizon 32 --warmup 2 --reps 10` — median of 10 after 2 warm-ups.
 
@@ -208,7 +208,7 @@ Analysis: `docs/runs/2026-09-19-latency-cpu.md`.
 
 ### wgpu (Metal)
 
-- Machine: Apple M2 (Darwin 25.3.0), `wgpu` backend, GPU confirmed idle (`llm-life train-a`/`eval-metrics` not running) for this sub-table's run.
+- Machine: Apple M2 (Darwin 25.3.0), `wgpu` backend, GPU confirmed idle for this sub-table's run.
 - Commit: this doc's commit, `t0-cli` built with `--no-default-features --features wgpu`.
 - Command, cold: `t0-cli bench --weights <F32|GGUF> [--config config.json] --backend wgpu --signals 1 --context 512 --horizon 32 --warmup 0 --reps 1` (first call, includes autotune/shader compile). Warm: same with `--warmup 2 --reps 10`, median of 10.
 
@@ -221,7 +221,7 @@ Analysis: `docs/runs/2026-09-19-latency-cpu.md`.
 
 wgpu is slower than native ndarray CPU at this batch size (n_signals=1) — expected, per-dispatch overhead of many small unbatched GPU kernel launches dominates; wgpu only wins once batched (see the "chunked wgpu batch" table above, ~38-52 ms/signal at n=100-1000). Analysis: `docs/runs/2026-09-19-latency-wgpu.md`.
 
-**Re-measured 2026-09-20, quiet, with `burn-wgpu`'s `fusion` feature** (the 705-946 ms warm numbers above were flagged as "under contention" in the earlier run — this re-run confirms GPU idle first, `pgrep` for `llm-life`/`jacobi`/`eval-metrics` showed only unrelated static file servers, no GPU-touching process). Same commands as above, `t0-cli` rebuilt with the fusion-enabled `Cargo.toml` (`docs/runs/2026-09-20-perf.md`):
+**Re-measured 2026-09-20, quiet, with `burn-wgpu`'s `fusion` feature** (the 705-946 ms warm numbers above were flagged as "under contention" in the earlier run — this re-run confirms GPU idle first: `pgrep` showed only unrelated static file servers, no GPU-touching process). Same commands as above, `t0-cli` rebuilt with the fusion-enabled `Cargo.toml` (`docs/runs/2026-09-20-perf.md`):
 
 | quant | file MB | load time (s) | cold first-call (ms) | warm median forward latency (ms) |
 |---|---|---|---|---|
@@ -229,7 +229,7 @@ wgpu is slower than native ndarray CPU at this batch size (n_signals=1) — expe
 | Q8_0 | 108.9 | 0.202-0.232 | 793.0 | 224.2 |
 | Q4_0 | 58.6 | 0.169-0.186 | 300.6 | 224.1 |
 
-Warm latency now converges to ~224 ms across all quants regardless of storage format (compute is F32 for all of them, dequant happens once at load — the same fact the CPU table above establishes), a 2.9-3.3x improvement over the previous (contended) 705-946 ms figures. Q8_0's cold-start (793 ms) is an outlier vs F32/Q4_0 (~300-317 ms) — not re-investigated this session, plausibly an autotune cache miss specific to the Q8_0 dequant-then-matmul shape combination on first call.
+Warm latency now converges to ~224 ms across all quants regardless of storage format (compute is F32 for all of them, dequant happens once at load — the same fact the CPU table above establishes), a 2.9-3.3x improvement over the previous (contended) 705-946 ms figures. Q8_0's cold-start (793 ms) is an outlier vs F32/Q4_0 (~300-317 ms) — not re-investigated this run, plausibly an autotune cache miss specific to the Q8_0 dequant-then-matmul shape combination on first call.
 
 ### WebGPU (browser)
 
@@ -288,13 +288,13 @@ Analysis: `docs/runs/2026-09-19-web-smoke.md`.
 | our Q8_0 CPU (ndarray/wasm) | 108.9 | 577.0 | 549.9 | 311.0 | 0.20% | 0.0818 | 1.1276 |
 | reference F32 (their code) | — | — | — | — | — | 0.0818 | 1.1278 |
 
-Fusion row is a prior session's state, `docs/runs/2026-09-20-perf.md` — pre-fusion numbers for the WebGPU rows (707.1/162.5/46.07 for Q8_0, 276.6/162.7/33.49 for Q4_0) are an even earlier baseline, kept in that doc for comparison rather than duplicated here.
+Fusion row is an earlier run's state, `docs/runs/2026-09-20-perf.md` — pre-fusion numbers for the WebGPU rows (707.1/162.5/46.07 for Q8_0, 276.6/162.7/33.49 for Q4_0) are an even earlier baseline, kept in that doc for comparison rather than duplicated here.
 
-`our t0-fast WebGPU`'s three official-protocol CRPS/MASE cells above were filled this session, once `forecast_rollout`'s stall was root-caused and fixed (a `usize` underflow, unrelated to the attention-kernel autotune bug this table previously blamed — see `docs/runs/2026-09-20-rollout.md`'s follow-up section). None of these 8 configs' horizons actually exceed `max_horizon`, so no rollout is needed for this particular subset; the fix mattered because it was blocking trust in the rest of `t0-fast`'s AR-capable surface. Numbers are from the native Metal build (`t0-cli gifteval --backend fast`, same engine/WGSL kernels the WebGPU build runs, accuracy is backend-transport-independent) at context capped to 8160 rather than the official 8192 (one config, `saugeenday`, loses 32 of its oldest samples — `t0-fast`'s attention kernel caps jointly-attended patches at 256, and 8192 is exactly 256 patches with no room for the horizon; the other 7 configs' full history is well under 8160 regardless). Full per-config table, timings, and a projected 97-config wall time: `docs/runs/2026-09-20-official-protocol-fast.md`.
+`our t0-fast WebGPU`'s three official-protocol CRPS/MASE cells above were filled this run, once `forecast_rollout`'s stall was root-caused and fixed (a `usize` underflow, unrelated to the attention-kernel autotune bug this table previously blamed — see `docs/runs/2026-09-20-rollout.md`'s follow-up section). None of these 8 configs' horizons actually exceed `max_horizon`, so no rollout is needed for this particular subset; the fix mattered because it was blocking trust in the rest of `t0-fast`'s AR-capable surface. Numbers are from the native Metal build (`t0-cli gifteval --backend fast`, same engine/WGSL kernels the WebGPU build runs, accuracy is backend-transport-independent) at context capped to 8160 rather than the official 8192 (one config, `saugeenday`, loses 32 of its oldest samples — `t0-fast`'s attention kernel caps jointly-attended patches at 256, and 8192 is exactly 256 patches with no room for the horizon; the other 7 configs' full history is well under 8160 regardless). Full per-config table, timings, and a projected 97-config wall time: `docs/runs/2026-09-20-official-protocol-fast.md`.
 
-**Both t0-fast quantized rows now beat their single-call warm number** (34.5ms and 29.8ms vs their 64.0ms) — the first time any engine in this repo has beaten the ORT WebGPU baseline on single-call latency. Batch-24 closed sharply this session (was 18.1/15.3ms/signal, now **11.2/11.2ms/signal**, both engine changes below) — ~1.26x behind their 8.87ms/signal, down from ~2x/1.7x, and well ahead of every Burn row's 34.0-34.2ms/signal. `t0-fast` is a separate engine (`crates/t0-fast`, raw `wgpu`, no Burn at inference — see `docs/runs/2026-09-20-perf.md`'s Phase A-D). The Q8_0/Q4_0-resident rows load the GGUF's block bytes straight into GPU buffers with no F32-expansion round trip (`GpuModel::load_from_gguf_bytes`). Two changes landed this session: (1) `forecast_batch_chunked`'s bench harness now calls the whole 24-signal batch as one forward pass (`chunk=24`) instead of two chunks of 16+8 — no code change needed, `t0-fast` never had Burn/cubecl's shared-memory-autotune chunk limit; (2) the tiled GEMM kernel (`linear_tiled{,_q8,_q4}.wgsl`, `M>=32`) gained 2x2 register blocking — one workgroup (still 16x16=256 threads) now covers a 32x32 output block instead of 16x16, each thread holding 4 accumulators and reusing its shared-memory reads across all 4. This flipped Q4_0 from "naive beats tiled" to "tiled beats naive" (dequant cost is now amortized over 4 outputs instead of 1), so all three weight residencies route through the tiled kernel at `M>=32`. Their exact-match GIFT-Eval-subset CRPS/MASE (footnote below) still holds — no quantization or numerics changed, only kernel scheduling — the official-protocol (8192-context) cell is still blank for `t0-fast` because that protocol needs autoregressive rollout, not implemented by any backend in this repo. Native numbers (single/batch-24 ms, M2, Metal, chunk=24): F32 96.0/21.9, Q8_0 101.9/22.2, Q4_0 71.4/22.2 (all three now tiled) — every row is *slower* natively than in the browser for reasons not fully explained this session (see `docs/runs/2026-09-20-perf.md`'s open question, unchanged by this session's kernel work). GPU memory unaffected by this session (weights + pool working set after cold+11 single+1 batch-24 calls, browser, prior measurement): Q8_0 396.9MB, Q4_0 346.6MB.
+**Both t0-fast quantized rows are faster than the ONNX export on a single call** (34.5ms and 29.8ms vs 64.0ms warm). Batch-24 closed sharply this run (was 18.1/15.3ms/signal, now **11.2/11.2ms/signal**, both engine changes below) — ~1.26x behind their 8.87ms/signal, down from ~2x/1.7x, and well ahead of every Burn row's 34.0-34.2ms/signal. `t0-fast` is a separate engine (`crates/t0-fast`, raw `wgpu`, no Burn at inference — see `docs/runs/2026-09-20-perf.md`'s Phase A-D). The Q8_0/Q4_0-resident rows load the GGUF's block bytes straight into GPU buffers with no F32-expansion round trip (`GpuModel::load_from_gguf_bytes`). Two changes landed this run: (1) `forecast_batch_chunked`'s bench harness now calls the whole 24-signal batch as one forward pass (`chunk=24`) instead of two chunks of 16+8 — no code change needed, `t0-fast` never had Burn/cubecl's shared-memory-autotune chunk limit; (2) the tiled GEMM kernel (`linear_tiled{,_q8,_q4}.wgsl`, `M>=32`) gained 2x2 register blocking — one workgroup (still 16x16=256 threads) now covers a 32x32 output block instead of 16x16, each thread holding 4 accumulators and reusing its shared-memory reads across all 4. This flipped Q4_0 from "naive beats tiled" to "tiled beats naive" (dequant cost is now amortized over 4 outputs instead of 1), so all three weight residencies route through the tiled kernel at `M>=32`. Their exact-match GIFT-Eval-subset CRPS/MASE (footnote below) still holds: no quantization or numerics changed, only kernel scheduling. Native numbers (single/batch-24 ms, M2, Metal, chunk=24): F32 96.0/21.9, Q8_0 101.9/22.2, Q4_0 71.4/22.2 (all three now tiled) — every row is *slower* natively than in the browser for reasons not fully explained this run (see `docs/runs/2026-09-20-perf.md`'s open question, unchanged by this run's kernel work). GPU memory unaffected by this run (weights + pool working set after cold+11 single+1 batch-24 calls, browser, prior measurement): Q8_0 396.9MB, Q4_0 346.6MB.
 
-**Full 97-config official-protocol run (Q4_0, RTX 3080 box):** aggregate
+**Full 97-config official-protocol run (Q4_0, RTX 3080 machine):** aggregate
 (geometric mean, raw non-naive-normalized MASE/CRPS, same formula as
 above) MASE 1.0252, CRPS 0.1254, 97/97 configs. This raw aggregate is
 **not** the number comparable to the model card — see
@@ -314,10 +314,10 @@ into this repo at `results/seasonal_naive/all_results.csv`; tool:
 
 | variant | normalized MASE | normalized CRPS | vs published card |
 |---|---|---|---|
-| Published card (t0-alpha, F32) | 0.7240 | 0.4941 | — (`theforecastingcompany/t0-alpha` `README.md` lines 319-320) |
-| Our F32 (full-97, box) | 0.7255 | 0.4942 | +0.2% MASE, +0.02% CRPS |
-| Our Q8_0 (full-97) | not available | not available | full-97 Q8_0 was never run on the RTX 3080 machine; only a non-normalizable 8-config-subset aggregate exists |
-| Our Q4_0 (full-97, box) | 0.7334 | 0.4973 | +1.3% MASE, +0.6% CRPS |
+| Published card (t0-alpha, F32) | 0.7240 | 0.4941 | — (`theforecastingcompany/t0-alpha` `README.md` lines 330-331, revision `7419278`) |
+| Our F32 (full-97, RTX 3080 machine) | 0.7255 | 0.4942 | +0.2% MASE, +0.02% CRPS |
+| Our Q8_0 (full-97, RTX 3080 machine) | 0.7258 | 0.4943 | +0.2% MASE, +0.04% CRPS |
+| Our Q4_0 (full-97, RTX 3080 machine) | 0.7334 | 0.4973 | +1.3% MASE, +0.6% CRPS |
 
 **Gate 1 (pipeline fidelity): our F32 reproduces the card** to within
 +0.2%/+0.02%, not a pipeline divergence. **Gate 2 (quantization cost in
@@ -328,12 +328,10 @@ furthest from our F32 (up to +12.2% MASE, on `bitbrains_fast_storage`,
 `bitbrains_rnd`, `m4_hourly`) are small-magnitude/noisy series, consistent
 with ordinary quantization sensitivity rather than a pipeline bug; no
 config shows F32 itself behaving anomalously. Full per-config F32+Q4_0
-table, the gate reasoning, and the 8-config-subset non-availability note:
+table, the gate reasoning, the Q8_0 run (2026-09-21 addendum) and the 8-config-subset non-availability note:
 `docs/runs/2026-09-20-official-protocol-full97-normalized.md`.
 
-Footnote — this repo's own 512-context-capped GIFT-Eval subset (not the official 8192-context protocol; `docs/runs/2026-09-19-gifteval-subset.md`, extended this session with `t0-cli gifteval --backend fast`): reference F32 0.0897/1.2139, our (Burn) F32 0.0897/1.2139, our (Burn) Q8_0 0.0897/1.2139, our (Burn) Q4_0 0.0898/1.2157, **our t0-fast Q8_0-resident 0.0897/1.2139 (bit-for-bit aggregate match to Burn's Q8_0 row, every per-task value identical)**, **our t0-fast Q4_0-resident 0.0898/1.2157 (same exact match to Burn's Q4_0 row)**.
-
-**Quotable paragraph.** On the same M2, same headless Chromium build, same `us_births` window (context 512, horizon 32): their official `t0-alpha-onnx-int8` export runs on onnxruntime-web's WebGPU EP at 64.0ms warm, 8.87ms/signal batched. Fused-Burn (`burn-wgpu` `fusion`) is still slower on both axes (169.3-169.8ms warm, 34.0-34.2ms/signal batch). `t0-fast` — a second engine with no Burn at inference, raw `wgpu`/WGSL kernels, GGUF block bytes kept resident (no F32 expansion), one command encoder per forecast — changes the picture: its Q8_0-resident build is **34.5ms warm, nearly 2x faster than their ONNX export**, and Q4_0-resident is **29.8ms, over 2x faster**; both are the first rows in this repo's history to beat the ORT baseline on single-call latency. Batch-24 dropped from an 18.1/15.3ms/signal historical baseline to **11.2/11.2ms/signal** this session (two changes: one-launch batching instead of two chunks, and 2x2 register blocking on the tiled GEMM kernel, which also flipped Q4_0 from "naive wins" to "tiled wins") — about 1.26x behind their 8.87ms/signal, the closest this repo has gotten. Numerical fidelity is unaffected: `t0-fast`'s Q8_0/Q4_0-resident forecasts still match Burn's own quantized path to kernel-level float rounding (~1-2e-6 max-abs, unchanged parity gate) and the tiled-kernel unit tests (naive-vs-tiled agreement to 1e-5) pass for all three residencies at both `m=1` and `m=40`. What's still open: the official 8192-context protocol's CRPS/MASE cells are blank for `t0-fast` (blocked on autoregressive rollout, no backend in this repo has it); the native numbers are, oddly, all slower than the browser numbers for the same engine and quantization (Q8_0 native 101.9ms vs browser 34.5ms) — not yet explained, flagged as a follow-up rather than chased further (see `docs/runs/2026-09-20-perf.md` for a 20-minute look this session); and batch-24 is still ~1.26x behind ORT's 8.87ms/signal, single-forecast is unaffected by any of this session's changes (both quantized rows' `M=17` rows/call stay under the `M>=32` tiled threshold, so single-call latency runs the same naive kernel as before).
+Footnote — this repo's own 512-context-capped GIFT-Eval subset (not the official 8192-context protocol; `docs/runs/2026-09-19-gifteval-subset.md`, extended this run with `t0-cli gifteval --backend fast`): reference F32 0.0897/1.2139, our (Burn) F32 0.0897/1.2139, our (Burn) Q8_0 0.0897/1.2139, our (Burn) Q4_0 0.0898/1.2157, **our t0-fast Q8_0-resident 0.0897/1.2139 (bit-for-bit aggregate match to Burn's Q8_0 row, every per-task value identical)**, **our t0-fast Q4_0-resident 0.0898/1.2157 (same exact match to Burn's Q4_0 row)**.
 
 Analysis and exact commands: `docs/runs/2026-09-20-head-to-head.md`.
 
@@ -366,7 +364,7 @@ Gate: max-abs quantile error <= 1e-4. Result: PASS (worst case 2.503395e-6 — s
 | q8_0 | 275.3 | 0.269x |
 | q4_0 | 149.5 | 0.146x |
 
-### Drift, apples to apples with the published INT8 card
+### Drift, next to the published t0-beta INT8 card
 
 Same protocol as alpha's Milestone 1a+ row: `t0-cli drift --weights-f32 model.safetensors --config config.json --quant <gguf|int8-theirs> --cases 54 --seed 42`; reference = our F32 forward pass (== PyTorch by the parity gate above); drift = `|error| / (max(reference) - min(reference))` over the whole forecast.
 
@@ -378,11 +376,11 @@ Same protocol as alpha's Milestone 1a+ row: `t0-cli drift --weights-f32 model.sa
 | int8-theirs (per-channel INT8, 96 matmuls; 6 I/O projections FP32) | 0.4027 | 0.1197 | 1.4333 | 0.5504 | 260.5 (estimated) |
 | **their published t0-beta INT8** (`t0-beta-onnx-int8`, real card, different case generator) | **0.2271** | — | **9.393** | — | 269.1 |
 
-Beta's drift is not uniformly worse or better than alpha's: Q8_0 mean-drift-worst is *tighter* on beta (0.20% vs alpha's 0.53%) but Q4_0 point-drift-worst is *looser* (14.58% vs alpha's 8.42%) — read as embed_dim 1024 (2x alpha) giving per-channel Q8_0 blocks more values to average error over, while Q4_0's fixed 32-value block granularity doesn't scale with width, so the roughest quant degrades faster on the wider model. Our q8_0 (0.20%/1.06%) beats their published beta INT8 card (0.2271%/9.393%) on mean drift and is far tighter on point drift; our int8-theirs reproduction (0.40%/1.43%) is close to their published number, as with alpha.
+Beta's drift is not uniformly worse or better than alpha's: Q8_0 mean-drift-worst is *tighter* on beta (0.20% vs alpha's 0.53%) but Q4_0 point-drift-worst is *looser* (14.58% vs alpha's 8.42%) — read as embed_dim 1024 (2x alpha) giving per-channel Q8_0 blocks more values to average error over, while Q4_0's fixed 32-value block granularity doesn't scale with width, so the roughest quant degrades faster on the wider model. Our q8_0 (0.20%/1.06%) is below their published beta INT8 card (0.2271%/9.393%) on mean drift and far tighter on point drift; our int8-theirs reproduction (0.40%/1.43%) is close to their published number, as with alpha.
 
 ### Official-protocol 8-config subset (their code, full protocol)
 
-Alpha's existing subset table used the port's own `t0-cli gifteval` (context capped to 512, no autoregressive rollout). For beta this task used the *other* runner instead — `run_gifteval.py`'s official-protocol harness (`gift_eval.data.Dataset` windowing, `gluonts.model.evaluate_model`, `t0.evaluation.T0Predictor`, `CONTEXT_LENGTH=8192`, full test split, no subsampling) — because that script lives in a different worktree (`fullsuite`) that this task must not edit, a beta-scoped copy was made instead: `tools/fullsuite_gifteval_beta.py` (same CONFIGS, same metrics, same `dequant_gguf.read_gguf` import, only the weights dir/gguf naming point at t0-beta). All 8 configs completed for all 3 variants (f32 reference, q8_0, q4_0 fake-quant dequantized back to f32 into the same PyTorch architecture), no time-box triggered (`--max-minutes 20`, actual wall time 4-5 min each).
+Alpha's existing subset table used the port's own `t0-cli gifteval` (context capped to 512, no autoregressive rollout). For beta this run used the *other* runner instead — `run_gifteval.py`'s official-protocol harness (`gift_eval.data.Dataset` windowing, `gluonts.model.evaluate_model`, `t0.evaluation.T0Predictor`, `CONTEXT_LENGTH=8192`, full test split, no subsampling) — through a beta-scoped copy, since that script is hardcoded to t0-alpha: `tools/fullsuite_gifteval_beta.py` (same CONFIGS, same metrics, same `dequant_gguf.read_gguf` import, only the weights dir/gguf naming point at t0-beta). All 8 configs completed for all 3 variants (f32 reference, q8_0, q4_0 fake-quant dequantized back to f32 into the same PyTorch architecture), no time-box triggered (`--max-minutes 20`, actual wall time 4-5 min each).
 
 CRPS (`mean_weighted_sum_quantile_loss`) / MASE per config:
 
@@ -411,7 +409,7 @@ Commands, full timing breakdown per config: `docs/runs/2026-09-20-beta.md`.
 - Command shape: `t0-cli bench --backend fast --fast-quant <q8_0|q4_0>
   --signals <1|24> --context 512 --horizon 32 --chunk 24 --reps 20
   --warmup 3`, median of 20 reps after 3 warmup reps, alpha and beta run
-  in the same session for direct comparability.
+  in the same run for direct comparability.
 
 Parity (max-abs quantile error, gate <=1e-4 for F32):
 

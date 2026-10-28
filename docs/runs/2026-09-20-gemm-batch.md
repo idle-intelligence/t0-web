@@ -2,19 +2,16 @@
 
 Machine: Apple M2 (Darwin 25.3.0). Native via `t0-cli bench --backend fast`
 (Metal/wgpu-native). GPU-contention rule checked before every timing run
-(`pgrep -f 'Chrome for Testing'`, plus this session additionally found and
-waited out a sibling Claude session's `cargo run --release --features
-native --bin llm-life -- train-vec` job, which is a real GPU consumer not
-covered by the task brief's Chrome-only check -- see "contention note"
-below). Fixture: `us_births`-equivalent bench window (context 512, horizon
+(`pgrep -f 'Chrome for Testing'`, plus a check for any other GPU job,
+see "contention note" below). Fixture: `us_births`-equivalent bench window (context 512, horizon
 32), weights `theforecastingcompany/t0-alpha` (F32 safetensors, and the
 existing `t0-alpha-q8_0.gguf`/`t0-alpha-q4_0.gguf` in `bench/ours/`).
 Starting point: commit `e8fae27` (main tip), which already carries five
-prior sessions' work (`docs/runs/2026-09-20-perf.md`) ending in a 2x2
+earlier runs' work (`docs/runs/2026-09-20-perf.md`) ending in a 2x2
 register-blocked, 32x32-output-tile, `TK=16` tiled GEMM
 (`crates/t0-fast/src/shaders/linear_tiled{,_q8,_q4}.wgsl`).
 
-## Why theirs is faster (this session's contribution to the answer)
+## Why theirs is faster (this run's contribution to the answer)
 
 Two independent attempts to widen this repo's tiled kernel -- 4x4
 register blocking (64x64 output tile) and a deeper K-tile (`TK` 16->32,
@@ -26,7 +23,7 @@ this GPU, at this problem's actual size (batch-24 rows are only 384,
 `out_dim` a few thousand), that resource increase cuts how many
 workgroups can be co-resident per GPU core, and occupancy loss dominates
 over the extra arithmetic intensity per shared-memory load. This is the
-same failure mode two of the five prior sessions already hit from a
+same failure mode two of the five earlier runs already hit from a
 different angle (`tasks_max` and the per-`linear()`-call custom fusion
 kernel, both in `docs/runs/2026-09-20-perf.md`) -- "make each dispatch do
 proportionally more work" keeps losing to "keep enough small units of
@@ -35,14 +32,14 @@ Read together with that doc's still-unresolved "native is ~3x slower
 than the browser's Dawn backend for quantized weights" finding, the
 likely honest answer to "why is theirs faster" is that the ONNX Web GPU
 EP's matmul either runs through a shader compiled/scheduled by Chromium's
-Dawn (which this repo's other sessions already found handles this
+Dawn (which this repo's other runs already found handles this
 workload's dispatch pattern differently, and better, than `wgpu-native`
 on the same Metal hardware) or uses a GEMM strategy tuned to Apple GPUs'
 actual SIMD-group width (32) and register budget, rather than the
 generic "bigger tile, more registers per thread" GEMM-tuning heuristic
-this session tried, which is tuned for GPUs with much larger per-thread
+this run tried, which is tuned for GPUs with much larger per-thread
 register files (desktop NVIDIA/AMD) than Apple's mobile-class GPU
-provides. Neither this session nor the five before it had the tooling
+provides. Neither this run nor the five before it had the tooling
 budget (a Metal/Dawn shader-compiler trace) to confirm this beyond
 inference from the tile-size regression pattern.
 
@@ -53,7 +50,7 @@ batch rows, ms for single-signal M=1), same commands each time:
 `--context 512 --horizon 32`, single: `--signals 1 --reps 5 --warmup 2`,
 batch: `--signals 24 --chunk 24 --reps 3 --warmup 2`.
 
-### Baseline (unchanged from `docs/runs/2026-09-20-perf.md`'s sixth session, re-measured this session for a clean same-machine comparison)
+### Baseline (unchanged from `docs/runs/2026-09-20-perf.md`'s sixth run, re-measured this run for a clean same-machine comparison)
 
 | quant | single M=1 (ms) | batch-24 (ms/signal) |
 |---|---|---|
@@ -71,9 +68,9 @@ Q8_0/Q4_0-vs-Burn's-own-quantized-path unchanged at 1.490116e-6 /
 2.026558e-6 -- bit-identical to baseline, as expected (no numerics
 changed, only tile/register shape). Committed (`362d9bf`), then reverted
 (`50171be`) once the regression below was confirmed with a paired
-same-session A/B (both kernels built and measured back-to-back on the
+same-run A/B (both kernels built and measured back-to-back on the
 same otherwise-idle machine state, to rule out the machine-noise swings
-this session also hit -- see contention note):
+this run also hit -- see contention note):
 
 | quant | before (2x2) ms/signal | after (4x4) ms/signal |
 |---|---|---|
@@ -99,7 +96,7 @@ immediately once regression was clear):
 - **4x4 register blocking**: quartered workgroup count (fewer independent
   units of work to hide latency) and quadrupled register pressure per
   thread (16 accumulators + 8 more for the per-k-step load registers) --
-  a 4.4x regression, the clearest signal this session produced.
+  a 4.4x regression, the clearest signal this run produced.
 - **Deeper K-tile (`TK=32`)**: doubled shared-memory footprint per
   workgroup without changing FLOPs or workgroup count -- still a clear
   ~1.45x regression, smaller than the 4x4 attempt but the same mechanism
@@ -112,25 +109,25 @@ immediately once regression was clear):
   move (bigger register tile, deeper K-tile) that generic (desktop-GPU-
   oriented) matmul tuning guides recommend next.
 
-## Not attempted this session
+## Not attempted this run
 
-`dot4I8Packed` (task brief's optional item 3): skipped given the above --
+`dot4I8Packed` (the plan's optional item 3): skipped given the above --
 two independent attempts at "more compute per dispatch" both regressed on
 this hardware/workload, and `dot4I8Packed` is the same category of change
 (more arithmetic intensity per instruction, not more concurrent work), so
 it carries the same regression risk without new evidence it would land
-differently. Fused bias+residual epilogue (task brief's item 2 fusion
+differently. Fused bias+residual epilogue (the plan's item 2 fusion
 note): not attempted -- `residual_block`/`mhsa`/`swiglu_ffn`'s
 `add_inplace` calls after `linear()` would need a new residual-buffer
 binding threaded through both `LinearDims`/`LinearQDims` and every
 pipeline's bind-group layout, a larger and riskier change than this
-session's budget allowed once the two GEMM-tiling attempts above had
-already used the session on a negative result; flagged as the next
+run's budget allowed once the two GEMM-tiling attempts above had
+already used the run on a negative result; flagged as the next
 concrete lever (each of `add1`/`add2`/residual-block's `add` is a whole
 extra dispatch per occurrence -- 2/layer x 24 layers -- that a fused
 epilogue would remove).
 
-## Net effect of this session
+## Net effect of this run
 
 No code changed in the final state: both attempted kernel changes were
 measured and reverted; `git diff e8fae27 -- crates/t0-fast` is empty.
@@ -139,25 +136,18 @@ Q8_0/Q4_0-vs-Burn). `cargo clippy -p t0-fast -p t0-cli -p t0-core
 --release --no-default-features --features fast,ndarray -- -D warnings`
 clean; `wasm-pack build crates/t0-wasm --target web --out-dir pkg-fast
 --release --no-default-features --features fast` builds clean (not
-copied anywhere, per the task brief). Batch-24 remains at this repo's
+copied anywhere, per the plan). Batch-24 remains at this repo's
 prior best (~11.2ms/signal in the browser per
-`docs/runs/2026-09-20-perf.md`'s sixth session, ~22.7-23.3ms/signal
+`docs/runs/2026-09-20-perf.md`'s sixth run, ~22.7-23.3ms/signal
 native -- the native/browser gap itself is the open question that doc
-already flagged and this session's regressions are consistent with, not
+already flagged and this run's regressions are consistent with, not
 new evidence toward resolving).
 
 ## Contention note (process, not a result)
 
-This session hit two separate sources of shared-M2-GPU contention beyond
-the task brief's named check: (1) `pgrep -f 'Chrome for Testing'`
-non-zero for a sustained period at the session's start (another job's
-browser benchmark), waited out via a background poll before any timing
-run; (2) a sibling Claude session (`llm-life`, `cargo run --release
---features native --bin llm-life -- train-vec`) actively compiling/
-running mid-session, discovered only because a batch-24 measurement came
-back at 49.6ms/signal -- more than double the otherwise-reproducible
-22.7ms/signal baseline -- prompting a process-table check rather than
-accepting the number. Waited out the same way. All numbers reported above
-are from windows where `pgrep` for both `Chrome for Testing` and
-`llm-life`/`cargo run` returned zero, each confirmed immediately before
-the measurement it's paired with.
+Two runs were held back for GPU contention: another headless browser
+benchmark at the start, waited out before any timing run, and another GPU
+job mid-run, found because a batch-24 measurement came back at
+49.6ms/signal, more than double the otherwise-reproducible 22.7ms/signal
+baseline. All numbers reported above are from windows with no other GPU
+process running, checked immediately before each measurement.

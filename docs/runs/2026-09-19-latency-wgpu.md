@@ -1,16 +1,14 @@
 # Single-signal native wgpu (Metal) latency, per quant
 
 - Machine: Apple M2 (Darwin 25.3.0), `wgpu` backend (`burn-wgpu`, Metal).
-  GPU rule checked before every run: `pgrep -fl 'llm-life train-a|eval-metrics'`
-  empty (confirmed empty for the whole session covered by this doc). No
+  No other GPU job ran during the whole run covered by this doc, and no
   other local `cargo`/`rustc` build was running while these numbers were
-  taken (one remote build over `ssh` to a different box, not competing for
-  local CPU/GPU).
+  taken.
 - Commit: this doc's commit, `t0-cli` built with
   `cargo build -p t0-cli --release --no-default-features --features wgpu`.
 - Weights: `../models/hf/theforecastingcompany/t0-alpha/{model.safetensors,config.json}`
   (F32); `/tmp/t0-alpha-{f16,q8_0,q4_0}.gguf` (config embedded, from this
-  session's earlier `t0-cli export-gguf`, same files as
+  run's earlier `t0-cli export-gguf`, same files as
   `docs/runs/2026-09-19-latency-cpu.md`).
 - Command, cold (first call, includes autotune/shader compile):
   `t0-cli bench --weights <F32|GGUF> [--config config.json] --backend wgpu --signals 1 --context 512 --horizon 32 --warmup 0 --reps 1`

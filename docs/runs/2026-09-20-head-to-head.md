@@ -1,9 +1,8 @@
 # Head-to-head: official t0-alpha ONNX INT8 export vs ours (same browser, same machine)
 
 - Machine: Apple M2 (Darwin 25.3.0). GPU rule checked before every run:
-  `pgrep -f 'cargo (build|test)|wasm-pack|rustc'` — one unrelated `llm-life`
-  native release build was compiling in a sibling repo during the wasm-pack
-  builds below (compile-only, no GPU device touched); no other process held
+  `pgrep -f 'cargo (build|test)|wasm-pack|rustc'`; one unrelated native
+  release build was compiling during the wasm-pack builds below (compile-only, no GPU device touched); no other process held
   the GPU device during any headless run (webgpu bench calls run
   sequentially, one at a time, never concurrently).
 - Commit: `09a7ed9` + this run's uncommitted changes (`t0-cli forecast-raw`,
@@ -26,7 +25,7 @@
   (not re-downloaded). Single file, no external-data shard.
 - Artifacts under test (ours): `web/models/t0-alpha-q8_0.gguf`
   (108,936,047 bytes) and `/tmp/t0-alpha-q4_0.gguf` (58,604,399 bytes),
-  both this session's `t0-cli export-gguf` output from
+  both this run's `t0-cli export-gguf` output from
   `theforecastingcompany/t0-alpha`'s `model.safetensors` (406.6 MB F32),
   same checkpoint as the ONNX export (`manifest.json`'s
   `source.model: theforecastingcompany/t0-alpha`).
@@ -118,7 +117,7 @@ Metal adapter over `http://` by default, same finding as
 Warm raw reps (ms), all 10 per row:
 
 - theirs (webgpu): `[81.2, 79.7, 79.8, 63.0, 61.5, 62.7, 60.4, 65.0, 65.5, 60.5]`
-- ours Q8_0 webgpu: see `/tmp/ours_q8_webgpu.json` (this session, not committed — file MB/ms summarized above)
+- ours Q8_0 webgpu: see `/tmp/ours_q8_webgpu.json` (this run, not committed — file MB/ms summarized above)
 - ours Q4_0 webgpu: see `/tmp/ours_q4_webgpu.json`
 - ours Q8_0 cpu: see `/tmp/ours_q8_cpu.json`
 
@@ -174,13 +173,8 @@ statistically powered one for "their recipe on our reimplementation":
 
 ## GIFT-Eval subset CRPS/MASE
 
-`docs/runs/2026-09-19-official-protocol-subset.md` (named in this task's
-brief) **does not exist** — the actual subset run and its numbers live in
-`docs/BENCHMARKS.md`'s "GIFT-Eval subset" section
-(`docs/runs/2026-09-19-gifteval-subset.md` is the real analysis doc for
-it). Flagging the stale filename rather than silently substituting.
-
-That subset (8 configs / 382 windows, capped 512-context, our own port
+The repo's own GIFT-Eval subset (`docs/runs/2026-09-19-gifteval-subset.md`:
+8 configs / 382 windows, capped 512-context, our own port
 only — reference PyTorch F32 vs our F32/Q8_0/Q4_0) has aggregate numbers:
 
 | | reference F32 | our F32 | our Q8_0 | our Q4_0 |
@@ -190,10 +184,8 @@ only — reference PyTorch F32 vs our F32/Q8_0/Q4_0) has aggregate numbers:
 
 **This does not include the ONNX INT8 artifact** — running the official
 export through the full `gluonts`-based GIFT-Eval harness (Python,
-`onnxruntime` CPU EP, per `onnx_predictor.py` in the `fullsuite` worktree)
-is a separate, longer task not attempted this session (that predictor
-requires the `fullsuite` worktree's own venv/dependency stack, which this
-task was scoped to leave untouched). The table in `docs/BENCHMARKS.md`
+`onnxruntime` CPU EP, per the full-suite harness's `onnx_predictor.py`)
+is a separate, longer task not attempted in this run. The table in `docs/BENCHMARKS.md`
 below marks this cell N/A rather than inferring it from the published
 full-protocol number (different context length, different config set —
 not comparable, see `docs/BENCHMARKS.md`'s existing caveat on this).
@@ -201,8 +193,8 @@ not comparable, see `docs/BENCHMARKS.md`'s existing caveat on this).
 ## What this doesn't cover
 
 - WASM-only fallback timing for their export (WebGPU ran, so no comparison
-  needed per this task's brief).
+  needed per the plan).
 - A true multi-signal batched kernel comparison beyond n=24 — not
-  requested this session.
+  requested this run.
 - Phone timing: every number here is desktop Chromium-for-Testing on
   the M2.

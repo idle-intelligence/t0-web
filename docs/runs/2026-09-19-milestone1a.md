@@ -36,7 +36,7 @@ No environment variable or public API was found in `cubek-matmul` 0.1.1 to force
 
 ## GPU contention
 
-A `jacobi2000` training run (`target/release/jacobi`) held the GPU during the first wgpu bench pass (checked via `ps -A -o comm | grep -E 'target/release/(jacobi|llm-life)'`). It finished before this doc was written; re-measuring with the GPU idle gave numbers within noise of the contended pass (e.g. F32 n=1: 0.2226s contended vs 0.2232s idle). The idle numbers are what's reported in `docs/BENCHMARKS.md`.
+Another training job held the GPU during the first wgpu bench pass (checked with `ps` before each run). It finished before this doc was written; re-measuring with the GPU idle gave numbers within noise of the contended pass (e.g. F32 n=1: 0.2226s contended vs 0.2232s idle). The idle numbers are what's reported in `docs/BENCHMARKS.md`.
 
 ## CPU timing noise
 
@@ -47,7 +47,7 @@ n=1000 ndarray medians have wide spread across the 5 reps (e.g. F32: 106.0s-135.
 The "wgpu batch-path bug" section above records the raw failure (n_signals
 >16 panics on any wgpu quant scheme with `cubek-matmul`'s 40 KB shared-memory
 tile vs. Metal's 32 KB limit) and that no `cubek-matmul` 0.1.1 public API was
-found to force a smaller tile. The workaround implemented this session is
+found to force a smaller tile. The workaround implemented this run is
 architectural, not a dependency patch: `t0_core::forecast_batch` (previously
 one un-chunked forward pass over all `n_signals`) now calls
 `forecast_batch_chunked` with a new `DEFAULT_BATCH_CHUNK = 16` constant
@@ -92,8 +92,7 @@ bump that lets the autotune pick a smaller tile remains the real fix.
 
 Extends the Milestone-1a latency table (`docs/BENCHMARKS.md`) with the
 previously-failing n=100/1000 wgpu rows, now possible via `--chunk 16`.
-Machine: Apple M2, GPU idle before each run (checked with `ps -A -o comm |
-grep -E 'target/release/(jacobi|llm-life)'`). Command per row: `t0-cli bench
+Machine: Apple M2, GPU idle before each run (checked with `ps`). Command per row: `t0-cli bench
 --weights <F32|GGUF> [--config ...] --backend wgpu --signals <N> --context
 512 --horizon 96 --reps 3 --chunk 16`.
 
@@ -121,7 +120,7 @@ goal, revisit if/when the cubecl-wgpu autotune bug itself gets fixed upstream.
 
 ## The drift benchmark: reproducing the INT8 card's protocol
 
-`theforecastingcompany/t0-beta-onnx-int8`'s card (fetched this session, full
+`theforecastingcompany/t0-beta-onnx-int8`'s card (fetched this run, full
 text in `docs/reports/t0-published-numbers.md`) publishes the drift formula
 verbatim ("absolute error divided by the reference series' full forecast
 range across the horizon and all quantiles, not relative error on an
@@ -142,8 +141,7 @@ used.
   of `drift_i` over all points; "point drift" for a case is the max.
 - 54 cases, aggregated the same two ways their card implies ("worst"
   suggests a max over cases; we additionally report the mean over cases in
-  our own table since GOAL.md's addendum asks for "worst/mean" columns they
-  don't publish a mean for).
+  our own table, since they do not publish a mean).
 - The quantization recipe for `int8-theirs`: `Weights::quantize_int8_theirs`
   (`crates/t0-core/src/weights.rs`) applies per-channel (per-output-row)
   signed INT8 quantize/dequantize (`gguf::int8_per_channel_roundtrip`) to
@@ -183,7 +181,7 @@ used.
   this milestone's existing scaler limitation (`FUTURE` covariate rows are
   unimplemented, `crates/t0-core/src/scaler.rs` panics loudly if asked).
 - **Aggregation**: "mean" columns in our table (mean-of-54-cases) are our
-  own addition per GOAL.md's addendum table spec; their card only reports
+  own addition; their card only reports
   the "worst" (max-of-54-cases) figures for both metrics.
 
 **Numbers** (full table `docs/BENCHMARKS.md`): our own Q8_0 (worst mean
@@ -199,7 +197,7 @@ recipe-vs-recipe (`int8-theirs` row) at best, not yet model-vs-model.
 
 ## What remains
 
-- GIFT-Eval subset harness: the accuracy verdict for Q8_0/Q4_0 belongs here, not this milestone (per the brief's own stop condition).
+- GIFT-Eval subset harness: the accuracy verdict for Q8_0/Q4_0 belongs here, not this milestone (the milestone's stop condition).
 - The browser page and web glue (`web/`) — not started.
 - WGSL Q8/Q4 dequant+matmul kernels for a real WASM+WebGPU deployment — this milestone's quantization is a load-time CPU-side dequant into f32 Burn tensors, not an on-GPU kernel; deferred to the WASM/browser milestone per `docs/reports/t0-alpha.md` §5.
 - The wgpu batch-path shared-memory bug above blocks a valid "1000 signals on wgpu" latency number until resolved.

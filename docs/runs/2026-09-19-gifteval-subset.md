@@ -1,9 +1,7 @@
 # GIFT-Eval subset — reference F32 vs ours F32/f16/Q8_0/Q4_0 on t0-alpha
 
-Machine: Apple M2 (Darwin 25.3.0). Contention check before every timed run:
-`ps -A -o comm | grep -E 'target/release/(jacobi|llm-life)'` — `llm-life`
-(another repo's fine-tune) was running throughout this session, so this run
-used the `ndarray` (CPU) backend exclusively, never `wgpu`; no wgpu numbers
+Machine: Apple M2 (Darwin 25.3.0). Another training job held the GPU
+throughout this run, so this run used the `ndarray` (CPU) backend exclusively, never `wgpu`; no wgpu numbers
 are reported here.
 
 ## Protocol source
@@ -38,7 +36,7 @@ are reported here.
 ## Subset (8 configs, term=short only)
 
 Chosen for small download (`fixtures/gifteval/` is 33 MB, well under the
-200 MB budget), domain coverage (weather/energy/traffic, per the task, plus
+200 MB budget), domain coverage (weather/energy/traffic, per the plan, plus
 two small clean sanity baselines), and univariate-or-few-variate targets
 (so t0-alpha's forward pass, and this port, forecast every series
 independently — no multivariate joint-attention path exercised here):
@@ -63,7 +61,7 @@ Rejected for this subset: everything at sub-hourly frequency (`15T`, `10T`,
 `5T`) — `electricity/15T` alone is 208 MB, `LOOP_SEATTLE/5T` 136 MB, both
 blow the download budget on their own; `m4_*`/`hospital`/`covid_deaths`
 (econ/healthcare, already have two non-weather/energy/traffic baselines);
-medium/long terms (task said short-horizon).
+medium/long terms (the plan said short-horizon).
 
 ## Deviation from the published protocol: context length
 

@@ -1,7 +1,6 @@
 # Official-protocol subset — their code, their protocol, our quants
 
-Machine: Apple M2 (Darwin 25.3.0), CPU only (no MPS/GPU per this task's
-laptop rules). Commit: `4404b6f` (worktree `fullsuite`, branch `fullsuite`).
+Machine: Apple M2 (Darwin 25.3.0), CPU only (no MPS/GPU). Commit: `4404b6f`.
 
 This run answers a different question than
 `docs/runs/2026-09-19-gifteval-subset.md`: that run compares OUR Burn/wgpu
@@ -35,26 +34,24 @@ code" apart from the substituted weights in (c)/(d).
 ## Versions
 
 - Python 3.14.3, `torch` 2.14.0, `gluonts` 0.15.1, `tfc-t0` 0.5.0,
-  `salesforce-gift-eval` 0.0.0a0 (all from the main checkout's `.venv`,
-  reused read-only per this task's setup — this worktree has no
-  network-install permission for pip), `onnxruntime` 1.24.2 (Homebrew
-  Python 3.14 site-packages, bridged in via `sys.path.append` inside
+  `salesforce-gift-eval` 0.0.0a0 (all from the repo's `.venv`),
+  `onnxruntime` 1.24.2 (a system Python 3.14 install, bridged in via `sys.path.append` inside
   `onnx_predictor.py` — appended, not prepended, to avoid shadowing the
   venv's numpy/pyarrow, which broke `datasets`' arrow formatting on the
   first attempt).
 - Weights: `theforecastingcompany/t0-alpha` (`model.safetensors`, sha
   unchanged from `docs/reports/t0-published-numbers.md`),
   `theforecastingcompany/t0-alpha-onnx-int8` (`t0-alpha-grouped-int8.onnx`,
-  sha256 `82da4392...`, downloaded this session to
+  sha256 `82da4392...`, downloaded this run to
   `$MODELS_DIR/hf/theforecastingcompany/t0-alpha-onnx-int8/`).
 - Our GGUF exports: `t0-cli export-gguf --quant q8_0|q4_0` (binary built at
-  the main checkout, commit `4404b6f`, invoked read-only from this worktree),
+  commit `4404b6f`),
   written to `tools/fullsuite/weights/t0-alpha-{q8_0,q4_0}.gguf`.
 
 ## Commands
 
 ```
-# GGUF exports (main checkout's already-built t0-cli, read-only)
+# GGUF exports (already-built t0-cli)
 t0-cli export-gguf --weights <t0-alpha>/model.safetensors --config <t0-alpha>/config.json --quant q8_0 --out tools/fullsuite/weights/t0-alpha-q8_0.gguf
 t0-cli export-gguf --weights <t0-alpha>/model.safetensors --config <t0-alpha>/config.json --quant q4_0 --out tools/fullsuite/weights/t0-alpha-q4_0.gguf
 
@@ -143,7 +140,7 @@ this being a context-length effect, not a quant-recipe difference (same
 Q4_0 weights, same drift numbers in `docs/BENCHMARKS.md`'s Milestone 1a+
 table). `onnx-int8` (their own INT8 export, independently engineered) sits
 in the same tight band as our own fake-quant Q8_0/Q4_0 rows, which is the
-apples-to-apples confirmation this task set out to get: at this protocol,
+apples-to-apples confirmation this run set out to get: at this protocol,
 our quantization ladder is not measurably worse than their own INT8 export
 on this checkpoint/config mix.
 
@@ -189,8 +186,6 @@ subsampling), unlike that other doc.
 
 ## Pending: the full 97-config run
 
-Not run tonight (CPU/M2, laptop rules). `tools/fullsuite/setup_3080.sh`
-(one-time venv setup) and `tools/fullsuite/launch_3080.sh` (systemd-run,
-detached, all four variants) are prepared for the RTX 3080 machine; see that
-script's header for the exact launch invocation. Neither script has been
-run against the RTX 3080 machine this session.
+Not run here (too long for the M2's CPU). It ran later on an RTX 3080
+machine: `docs/runs/2026-09-20-official-protocol-full97.md` and
+`docs/runs/2026-09-20-official-protocol-full97-normalized.md`.

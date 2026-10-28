@@ -13,7 +13,7 @@ touches our Rust port for: same 8 GIFT-Eval configs, same protocol
 (`CONTEXT_LENGTH≈8192`, full test split, no window subsampling), but
 forecast through `t0-cli gifteval --backend fast` (`crates/t0-fast`, raw
 `wgpu`/WGSL, no Burn at inference) instead of their PyTorch model. This
-was blocked until this session because the official protocol's longest
+was blocked until this run because the official protocol's longest
 windows (`saugeenday`, `us_births`) need more than one forward pass' worth
 of patches at `max_horizon`-sized single windows in some configs and,
 before the rollout-underflow fix above, `forecast_rollout` never
@@ -21,7 +21,7 @@ terminated on any backend. In fact none of these 8 configs' horizons
 (<=30) actually exceed `max_horizon=1024`, so no AR rollout is needed here
 after all — every window here is a single `t0_fast::forecast` call; the
 rollout fix mattered because it was blocking trust in the rest of this
-session's fast-backend work, not because this particular subset needed it.
+run's fast-backend work, not because this particular subset needed it.
 
 ## Deviation: context 8160, not 8192
 
@@ -66,7 +66,7 @@ t0-cli gifteval --backend fast --weights /tmp/t0_gguf/t0-alpha-q4_0.gguf \
 
 Manifest + per-window `.f32` context/future files and forecast outputs are
 regenerable data (like `fixtures/gifteval/`), written to `/tmp` this
-session rather than committed.
+run rather than committed.
 
 ## Results: our `t0-fast` engine vs their code, per config
 
@@ -163,4 +163,4 @@ this subset's total time by `97/8 = 12.125x` gives:
 
 This is an order-of-magnitude estimate for planning purposes, not a
 commitment — the full 97-config run was explicitly out of scope for this
-session and was not attempted.
+run and was not attempted.

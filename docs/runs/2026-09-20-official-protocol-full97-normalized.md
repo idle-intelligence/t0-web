@@ -5,14 +5,15 @@
 - Input: `results/full97/q4_0/all_results.csv` and `results/full97/f32/all_results.csv`
   (97 rows each, their code/protocol, our dequantized Q4_0 / native F32
   weights — see `docs/runs/2026-09-20-official-protocol-full97.md` for how
-  the Q4_0 run was produced; the F32 control was the RTX 3080 machine's run left
-  "running" in that doc, finished this update). F32 fetched read-only:
-  `scp <rtx-3080-machine>:/path/to/t0-web/results/f32/{all_results.csv,timing_summary.json} results/full97/f32/`.
+  the Q4_0 run was produced; the F32 control is the RTX 3080 machine's run
+  listed as running in that doc, since finished). The F32
+  `all_results.csv` and `timing_summary.json` were copied from that
+  machine's `results/f32/` into `results/full97/f32/`.
 - Baseline: Seasonal Naive per-config results, fetched read-only from
   `github.com/SalesforceAIResearch/gift-eval`, commit `9a014e9e8ea130ba39c100c60d5dcbab7db57ac9`,
-  `results/seasonal_naive/all_results.csv` (`git clone --depth 1` into
-  `$CLAUDE_JOB_DIR/tmp/gift-eval`, then copied verbatim to
-  `results/seasonal_naive/all_results.csv` in this repo, 97 rows + header).
+  `results/seasonal_naive/all_results.csv` (shallow clone, then copied
+  verbatim to `results/seasonal_naive/all_results.csv` in this repo, 97
+  rows + header).
 - Definition, with citation: the GIFT-Eval leaderboard's normalization is
   in `notebooks/zeus.ipynb`'s "Print Results" cell (same commit as above).
   Per config (joined on the `dataset` column, e.g. `"loop_seattle/5T/short"`):
@@ -28,7 +29,7 @@
   reconciliation was needed for this run.
 - Tool: `tools/score_official_protocol.py` gained `--results-csv` (score an
   already-computed `all_results.csv` directly, since the RTX 3080 machine's run's
-  manifest/forecast files were regenerable `/tmp` data, not committed — see
+  manifest/forecast files were regenerable data, not committed; see
   below) and `--normalize-by <seasonal_naive_csv>` (this normalization,
   with the unmatched-key check above built in and failing loudly on any
   gap).
@@ -45,18 +46,18 @@
     --normalize-by results/seasonal_naive/all_results.csv
 ```
 
-(Reusable for any future weight residency: swap `--results-csv` for that
-variant's `all_results.csv`, e.g. `results/full97/q8_0/all_results.csv`
-once/if a full-97 Q8_0 box run exists.)
+(Reusable for any weight residency: swap `--results-csv` for that
+variant's `all_results.csv`, e.g. `results/full97/q8_0/all_results.csv`,
+the addendum below.)
 
 ## Release gate table
 
 | variant | normalised MASE | normalised CRPS | vs published card |
 |---|---|---|---|
-| Published card (t0-alpha, F32) | 0.7240 | 0.4941 | — (`theforecastingcompany/t0-alpha` README lines 319-320) |
-| Our F32 (this run, box, their code/protocol) | 0.7255 | 0.4942 | **+0.2% MASE, +0.02% CRPS** |
-| Our Q8_0 (full-97) | not available | not available | full-97 Q8_0 was never run on the RTX 3080 machine this session; only the 8-config subset exists (raw, non-normalizable — see below) |
-| Our Q4_0 (this run, box) | 0.7334 | 0.4973 | +1.3% MASE, +0.6% CRPS |
+| Published card (t0-alpha, F32) | 0.7240 | 0.4941 | — (`theforecastingcompany/t0-alpha` README lines 330-331, revision `7419278`) |
+| Our F32 (this run, RTX 3080 machine, their code/protocol) | 0.7255 | 0.4942 | **+0.2% MASE, +0.02% CRPS** |
+| Our Q8_0 (2026-09-21 addendum below) | 0.7258 | 0.4943 | +0.2% MASE, +0.04% CRPS |
+| Our Q4_0 (this run, RTX 3080 machine) | 0.7334 | 0.4973 | +1.3% MASE, +0.6% CRPS |
 
 **Gate 1 — does our F32 pipeline reproduce the card:** yes. 0.7255 vs
 0.7240 MASE (+0.2%) and 0.4942 vs 0.4941 CRPS (+0.02%) is reproduction to
@@ -117,16 +118,15 @@ than contradicted at the per-config level.
 `docs/runs/2026-09-20-official-protocol-fast.md` (our `t0-fast` engine
 on the same 8 configs) explicitly documents that its manifest,
 per-window context/future `.f32` files, and forecast outputs were
-"regenerable data ... written to `/tmp` this session rather than
-committed" (that doc's line under "Commands"). Checked this session:
-none of `/tmp/gifteval_official*` exist anymore, and no per-config
+"regenerable data ... rather than committed" (that doc's line under
+"Commands"). Those files no longer exist, and no per-config
 `all_results.csv`-style file for that subset was ever committed under
 `results/`. Only the aggregate numbers survive, in that doc's tables and
 in `docs/BENCHMARKS.md`'s official-protocol subset table — those are
 already the raw (non-normalized) metric, and cannot be renormalized here
 without the underlying per-config forecasts, which would require
 re-running `t0-cli gifteval --backend fast` (a GPU job, out of scope for
-this session). If that subset is regenerated in a future session, the
+this run). If that subset is regenerated in a future run, the
 same `--results-csv`/`--normalize-by` flags added here apply directly —
 the 8 configs are also gift-eval's `name/freq/term` keys and are a subset
 of `results/seasonal_naive/all_results.csv`'s 97 rows.
@@ -244,7 +244,7 @@ takes all 97 configs as-is.
 
 ## Addendum, 2026-09-21: Q8_0 on the same protocol
 
-Same box, same harness, same 97 configs and Seasonal Naive normalization. Run as a detached user unit (`t0-q8-full97`), wall time about 1h10m, `stopped_early: false`, inference time summed over configs 2931 s (`results/full97/q8_0/timing_summary.json`).
+Same RTX 3080 machine, same harness, same 97 configs and Seasonal Naive normalization. Run detached, wall time about 1h10m, `stopped_early: false`, inference time summed over configs 2931 s (`results/full97/q8_0/timing_summary.json`).
 
 ```
 .venv/bin/python3 tools/score_official_protocol.py --variant q8_0_full97 \
