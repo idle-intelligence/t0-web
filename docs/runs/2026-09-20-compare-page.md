@@ -1,7 +1,8 @@
 # Compare page: single-tab head-to-head (onnxruntime-web vs t0-fast)
 
 `bench/compare/index.html` + `bench/compare/compare.js` load both engines
-in one tab — theforecastingcompany's `t0-alpha-onnx-int8` export via
+in one tab — theforecastingcompany's `t0-alpha-onnx-int8` export (this run:
+revision `1c18a3e2`, 2026-09-13, before its 2026-10-18 re-export) via
 `onnxruntime-web` (WebGPU EP, wasm fallback) and our GGUF-resident t0-fast
 (`crates/t0-wasm/pkg-fast`, Q8_0 default / Q4_0 button) — so every number is
 measured live in whichever browser opens the page, not baked in. This run

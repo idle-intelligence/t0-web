@@ -19,8 +19,9 @@
   at test time.
 - wgpu backend: `burn-wgpu` / `burn` `0.20` (`Cargo.toml`), `cubecl-wgpu`
   transitively (pinned pre-1.0 versions).
-- Artifact under test (theirs): `theforecastingcompany/t0-alpha-onnx-int8`,
-  `t0-alpha-grouped-int8.onnx`, 107,151,882 bytes, already present at
+- Artifact under test (theirs): `theforecastingcompany/t0-alpha-onnx-int8`
+  revision `1c18a3e2` (2026-09-13, before its 2026-10-18 re-export; the
+  current export is 103.6 MB), `t0-alpha-grouped-int8.onnx`, 107,151,882 bytes, already present at
   `$MODELS_DIR/hf/theforecastingcompany/t0-alpha-onnx-int8/`
   (not re-downloaded). Single file, no external-data shard.
 - Artifacts under test (ours): `web/models/t0-alpha-q8_0.gguf`
