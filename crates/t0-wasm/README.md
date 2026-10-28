@@ -26,7 +26,11 @@ the browser can create a WebGPU device, the CPU build otherwise. The
 - `initBackend(): Promise<void>` — **must be awaited once, before
   `T0Wasm.load`**, on every backend. On `wgpu` this drives the real async
   `requestAdapter`/`requestDevice` setup (`cubecl_wgpu::init_setup_async`);
-  a no-op on `ndarray`. See "WebGPU status" below for why this exists.
+  on `fast` it creates the `t0-fast` engine's device and rejects if none
+  can be created; a no-op on `ndarray`. See "WebGPU on the Burn `wgpu`
+  feature" below for why this exists. On `fast`, `forecast`,
+  `forecastBatch` and `forecastBatchRows` reject with the engine's error
+  instead of trapping.
 - `T0Wasm.load(gguf_bytes: Uint8Array) -> T0Wasm` — parses a GGUF file (as
   written by `t0-cli export-gguf`) and builds the model.
 - `instance.forecast(context: Float32Array, horizon: number) -> Promise<Float32Array>`

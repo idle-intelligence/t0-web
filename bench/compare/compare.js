@@ -18,11 +18,12 @@ const ORT_WASM_PATHS = ORT_CDN_BASE;
 
 // Same engine-build version tag web/worker.js uses on its wasm URLs, so a
 // hard reload here picks up a rebuilt pkg-wgpu the same way the demo does.
-const ENGINE_BUILD = '2026-09-21';
+const ENGINE_BUILD = '2026-10-28';
 
 const ONNX_MODEL_URL = 'https://huggingface.co/theforecastingcompany/t0-alpha-onnx-int8/resolve/main/t0-alpha-grouped-int8.onnx';
 const ONNX_SERIES_URL = '../../web/data/series.f32';
 const OURS_PKG = `../../web/pkg-wgpu/t0_wasm.js?v=${ENGINE_BUILD}`;
+const OURS_WASM = `../../web/pkg-wgpu/t0_wasm_bg.wasm?v=${ENGINE_BUILD}`;
 const OURS_GGUF = {
     q8_0: 'https://huggingface.co/idle-intelligence/t0-alpha-q8_0-webgpu/resolve/main/t0-alpha-q8_0.gguf',
     q4_0: 'https://huggingface.co/idle-intelligence/t0-alpha-q4_0-webgpu/resolve/main/t0-alpha-q4_0.gguf',
@@ -229,7 +230,7 @@ async function onnxRun(session, contextRows, context, horizon) {
 // ---- ours (t0-fast) side ----
 async function loadOurs(quant) {
     const t0wasm = await import(OURS_PKG);
-    await t0wasm.default();
+    await t0wasm.default({ module_or_path: new URL(OURS_WASM, import.meta.url).href });
     await t0wasm.initBackend();
     const url = OURS_GGUF[quant];
     const headResp = await fetch(url, { method: 'HEAD' });
@@ -252,7 +253,7 @@ async function oursRun(model, context, horizon) {
 // Q8_0/Q4_0 GGUF dequantized back to f32.
 async function loadOursF32() {
     const t0wasm = await import(OURS_PKG);
-    await t0wasm.default();
+    await t0wasm.default({ module_or_path: new URL(OURS_WASM, import.meta.url).href });
     await t0wasm.initBackend();
     const [stBuf, configText] = await Promise.all([
         fetch(OURS_F32_SAFETENSORS).then((r) => r.arrayBuffer()),

@@ -19,13 +19,13 @@
  */
 
 // Set to e.g. './models' to load `<LOCAL_MODELS_DIR>/<key>/<file>` and
-// `<LOCAL_MODELS_DIR>/<key>/config.json` instead of Hugging Face -- lets the
-// four weights be tested before their HF repos exist. Empty by default.
+// `<LOCAL_MODELS_DIR>/<key>/config.json` instead of Hugging Face, to test
+// new weights locally. Empty by default.
 const LOCAL_MODELS_DIR = '';
 
 // Version tag on the engine URLs: browsers cache the wasm at a fixed path
 // across rebuilds, even through a hard reload. Bump when the engine changes.
-const ENGINE_BUILD = '2026-09-22';
+const ENGINE_BUILD = '2026-10-28';
 
 // The four released weights. Each Hugging Face repo holds one GGUF plus its
 // config.json (the source of that model's quantile levels).
@@ -142,14 +142,13 @@ async function cachedFetch(url, label) {
 
 // Backend selection: WebGPU if this worker's `navigator.gpu` exists AND an
 // adapter can actually be obtained (dedicated workers get their own
-// WorkerNavigator with the same `gpu` property as the window) -- some
-// browsers/flags expose `navigator.gpu` but fail requestAdapter(), and
-// t0-wasm's wgpu build has no graceful fallback for that (it traps), so
-// the check has to be the real thing, not just feature detection. Two
-// separate wasm-pack outputs -- `pkg-wgpu/` (built with
-// `--no-default-features --features wgpu`) and `pkg/` (default,
-// `ndarray`) -- since the backend is a compile-time Cargo feature, same
-// convention as `crates/cli`.
+// WorkerNavigator with the same `gpu` property as the window); some
+// browsers expose `navigator.gpu` but fail requestAdapter(). If the WebGPU
+// build's initBackend() then fails to create a device, loadEngine's caller
+// falls back to the CPU build. Two separate wasm-pack outputs, since the
+// backend is a compile-time Cargo feature: `pkg-wgpu/` (t0-wasm built with
+// `--no-default-features --features fast`, the t0-fast engine) and `pkg/`
+// (default `ndarray`, the t0-core CPU engine).
 let BACKEND = null;
 let PKG_DIR = null;
 
@@ -169,6 +168,17 @@ async function detectBackend() {
     }
     BACKEND = 'wasm/ndarray';
     PKG_DIR = './pkg';
+}
+
+async function loadEngine(pkgDir) {
+    const mod = await import(new URL(`${pkgDir}/t0_wasm.js?v=${ENGINE_BUILD}`, import.meta.url).href);
+    await mod.default({ module_or_path: new URL(`${pkgDir}/t0_wasm_bg.wasm?v=${ENGINE_BUILD}`, import.meta.url).href });
+    // Must run before T0Wasm.load(): on WebGPU this does the async
+    // requestAdapter()/requestDevice() setup that wasm has no blocking
+    // executor for, and rejects if no device can be created; a no-op on
+    // ndarray.
+    await mod.initBackend();
+    return mod;
 }
 
 async function handleLoad(modelKey) {
@@ -192,14 +202,16 @@ async function handleLoad(modelKey) {
 
     if (!t0wasm) {
         self.postMessage({ type: 'status', text: `Loading WASM module (${BACKEND})...` });
-        const wasmJsUrl = new URL(`${PKG_DIR}/t0_wasm.js?v=${ENGINE_BUILD}`, import.meta.url).href;
-        t0wasm = await import(wasmJsUrl);
-        await t0wasm.default({ module_or_path: new URL(`${PKG_DIR}/t0_wasm_bg.wasm?v=${ENGINE_BUILD}`, import.meta.url).href });
-        // Must run before T0Wasm.load(): on wgpu this drives the async
-        // requestAdapter()/requestDevice() setup that WASM has no blocking
-        // executor for (see t0-wasm's initBackend doc comment); a no-op on
-        // ndarray.
-        await t0wasm.initBackend();
+        try {
+            t0wasm = await loadEngine(PKG_DIR);
+        } catch (err) {
+            if (BACKEND !== 'webgpu') throw err;
+            console.warn('[worker] WebGPU setup failed, using the CPU engine:', err);
+            BACKEND = 'wasm/ndarray';
+            PKG_DIR = './pkg';
+            self.postMessage({ type: 'status', text: `Loading WASM module (${BACKEND})...` });
+            t0wasm = await loadEngine(PKG_DIR);
+        }
     }
 
     const urls = modelUrls(key);

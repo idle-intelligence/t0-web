@@ -5,7 +5,9 @@
 //! crate never touches a device until `Engine::new_async` explicitly
 //! builds one), so `T0Wasm::load` needs that already-built `Engine`; JS
 //! must still call `await initBackend()` once before `T0Wasm.load(...)`,
-//! same calling convention as the Burn variant.
+//! same calling convention as the Burn variant. Every call that can fail
+//! (no adapter or device, a forecast error) rejects or throws a JS error
+//! instead of trapping, so the caller can fall back to the CPU build.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -24,18 +26,24 @@ thread_local! {
     static ENGINE: RefCell<Option<Rc<t0_fast::Engine>>> = const { RefCell::new(None) };
 }
 
-fn engine() -> Rc<t0_fast::Engine> {
-    ENGINE.with(|cell| cell.borrow().clone()).expect("initBackend() must be awaited before T0Wasm.load()")
+fn engine() -> Result<Rc<t0_fast::Engine>, JsValue> {
+    ENGINE
+        .with(|cell| cell.borrow().clone())
+        .ok_or_else(|| JsValue::from_str("initBackend() must be awaited before T0Wasm.load()"))
 }
 
 #[wasm_bindgen(js_name = initBackend)]
-pub async fn init_backend() {
-    let engine = t0_fast::Engine::new_async().await.expect("t0-fast: no WebGPU adapter/device");
+pub async fn init_backend() -> Result<(), JsValue> {
+    // Idempotent: a second `initBackend()` call (e.g. a page that reloads
+    // the model) just keeps the first engine/device.
+    if ENGINE.with(|cell| cell.borrow().is_some()) {
+        return Ok(());
+    }
+    let engine = t0_fast::Engine::new_async().await.map_err(to_js_err)?;
     ENGINE.with(|cell| {
-        // Idempotent: a second `initBackend()` call (e.g. a page that
-        // reloads the model) just keeps the first engine/device.
         cell.borrow_mut().get_or_insert_with(|| Rc::new(engine));
     });
+    Ok(())
 }
 
 #[wasm_bindgen]
@@ -57,7 +65,8 @@ impl T0Wasm {
     #[wasm_bindgen]
     pub fn load(gguf_bytes: &[u8]) -> Result<T0Wasm, JsValue> {
         console_error_panic_hook::set_once();
-        let model = t0_fast::load_model_from_gguf(&engine(), gguf_bytes).map_err(to_js_err)?;
+        let engine = engine()?;
+        let model = t0_fast::load_model_from_gguf(&engine, gguf_bytes).map_err(to_js_err)?;
         Ok(T0Wasm { model })
     }
 
@@ -74,7 +83,8 @@ impl T0Wasm {
         console_error_panic_hook::set_once();
         let weights = t0_core::Weights::load_bytes(safetensors_bytes).map_err(to_js_err)?;
         let config: t0_core::T0Config = serde_json::from_str(config_json).map_err(|e| JsValue::from_str(&format!("{e:#}")))?;
-        let model = t0_fast::load_model(&engine(), &weights, config, t0_fast::WeightQuant::F32).map_err(to_js_err)?;
+        let engine = engine()?;
+        let model = t0_fast::load_model(&engine, &weights, config, t0_fast::WeightQuant::F32).map_err(to_js_err)?;
         Ok(T0Wasm { model })
     }
 
@@ -98,26 +108,26 @@ impl T0Wasm {
     /// variant's `forecast` (see `burn_impl.rs`): raw context in, `horizon
     /// * n_quantiles` values out, time-major then quantile-minor.
     #[wasm_bindgen]
-    pub async fn forecast(&self, context: Vec<f32>, horizon: usize) -> Vec<f32> {
+    pub async fn forecast(&self, context: Vec<f32>, horizon: usize) -> Result<Vec<f32>, JsValue> {
         let t_ctx = context.len();
-        let engine = engine();
-        t0_fast::forecast_async(&engine, &self.model, &context, 1, t_ctx, horizon).await.expect("t0-fast forecast failed")
+        let engine = engine()?;
+        t0_fast::forecast_async(&engine, &self.model, &context, 1, t_ctx, horizon).await.map_err(to_js_err)
     }
 
     /// `n_signals` independent forecasts, chunked at `chunk_size` (0 means
     /// "no chunking") -- same contract as the Burn variant's
     /// `forecastBatch`.
     #[wasm_bindgen(js_name = forecastBatch)]
-    pub async fn forecast_batch(&self, context: Vec<f32>, n_signals: usize, horizon: usize, chunk_size: usize) -> Vec<f32> {
+    pub async fn forecast_batch(&self, context: Vec<f32>, n_signals: usize, horizon: usize, chunk_size: usize) -> Result<Vec<f32>, JsValue> {
         let t_ctx = context.len();
         let mut contexts = Vec::with_capacity(n_signals * t_ctx);
         for _ in 0..n_signals {
             contexts.extend_from_slice(&context);
         }
-        let engine = engine();
+        let engine = engine()?;
         t0_fast::forecast_batch_chunked_async(&engine, &self.model, &contexts, n_signals, t_ctx, horizon, chunk_size)
             .await
-            .expect("t0-fast forecast_batch failed")
+            .map_err(to_js_err)
     }
 
     /// `n_signals` independent forecasts over *distinct* contexts (possibly
@@ -130,12 +140,12 @@ impl T0Wasm {
     /// each row's result matches a standalone `forecast()` call on that
     /// row exactly.
     #[wasm_bindgen(js_name = forecastBatchRows)]
-    pub async fn forecast_batch_rows(&self, contexts: Vec<f32>, lengths: Vec<u32>, horizon: usize) -> Vec<f32> {
+    pub async fn forecast_batch_rows(&self, contexts: Vec<f32>, lengths: Vec<u32>, horizon: usize) -> Result<Vec<f32>, JsValue> {
         const BATCH_ROWS_CHUNK: usize = 24;
         let lengths: Vec<usize> = lengths.into_iter().map(|l| l as usize).collect();
-        let engine = engine();
+        let engine = engine()?;
         t0_fast::forecast_batch_rows_chunked_async(&engine, &self.model, &contexts, &lengths, horizon, BATCH_ROWS_CHUNK)
             .await
-            .expect("t0-fast forecast_batch_rows failed")
+            .map_err(to_js_err)
     }
 }
