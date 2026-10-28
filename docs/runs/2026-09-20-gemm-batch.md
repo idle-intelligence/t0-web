@@ -11,37 +11,14 @@ earlier runs' work (`docs/runs/2026-09-20-perf.md`) ending in a 2x2
 register-blocked, 32x32-output-tile, `TK=16` tiled GEMM
 (`crates/t0-fast/src/shaders/linear_tiled{,_q8,_q4}.wgsl`).
 
-## Why theirs is faster (this run's contribution to the answer)
+## Result
 
-Two independent attempts to widen this repo's tiled kernel -- 4x4
-register blocking (64x64 output tile) and a deeper K-tile (`TK` 16->32,
-same 2x2/32x32 shape) -- both made batch-24 **slower**, not faster, by
-4.4x and ~1.45x respectively (measured below, reproducible across
-repeats). Both changes increase per-workgroup resource use (accumulator
-registers, or shared-memory footprint) without changing total FLOPs; on
-this GPU, at this problem's actual size (batch-24 rows are only 384,
-`out_dim` a few thousand), that resource increase cuts how many
-workgroups can be co-resident per GPU core, and occupancy loss dominates
-over the extra arithmetic intensity per shared-memory load. This is the
-same failure mode two of the five earlier runs already hit from a
-different angle (`tasks_max` and the per-`linear()`-call custom fusion
-kernel, both in `docs/runs/2026-09-20-perf.md`) -- "make each dispatch do
-proportionally more work" keeps losing to "keep enough small units of
-work in flight to hide latency" on this hardware/workload combination.
-Read together with that doc's still-unresolved "native is ~3x slower
-than the browser's Dawn backend for quantized weights" finding, the
-likely honest answer to "why is theirs faster" is that the ONNX Web GPU
-EP's matmul either runs through a shader compiled/scheduled by Chromium's
-Dawn (which this repo's other runs already found handles this
-workload's dispatch pattern differently, and better, than `wgpu-native`
-on the same Metal hardware) or uses a GEMM strategy tuned to Apple GPUs'
-actual SIMD-group width (32) and register budget, rather than the
-generic "bigger tile, more registers per thread" GEMM-tuning heuristic
-this run tried, which is tuned for GPUs with much larger per-thread
-register files (desktop NVIDIA/AMD) than Apple's mobile-class GPU
-provides. Neither this run nor the five before it had the tooling
-budget (a Metal/Dawn shader-compiler trace) to confirm this beyond
-inference from the tile-size regression pattern.
+Two attempts to widen the tiled kernel, 4x4 register blocking (64x64
+output tile) and a deeper K-tile (`TK` 16->32, same 2x2/32x32 shape),
+both made batch-24 **slower**, by 4.4x and ~1.45x respectively (measured
+below, reproducible across repeats). Both increase per-workgroup resource
+use (accumulator registers, or shared memory) without changing total
+FLOPs.
 
 ## Measurements
 
