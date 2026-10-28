@@ -6,8 +6,9 @@ the following third-party work.
 
 ## The Forecasting Company — t0-alpha / t0-beta
 
-This repo is a from-scratch Rust/Burn/wgpu port of The Forecasting
-Company's t0-alpha and t0-beta time-series forecasting models.
+This repo is a from-scratch Rust port of The Forecasting Company's
+t0-alpha and t0-beta time-series forecasting models: `t0-fast` on raw
+wgpu with WGSL kernels for WebGPU, and Burn's ndarray backend on CPU.
 
 - Reference weights and code: https://huggingface.co/theforecastingcompany/t0-alpha
   and https://huggingface.co/theforecastingcompany/t0-beta
@@ -18,6 +19,20 @@ Company's t0-alpha and t0-beta time-series forecasting models.
 No original code from `tfc-t0` is copied into this repo; the port is a
 from-scratch reimplementation against the published architecture and the
 reference model's numerical behavior (see `docs/reports/t0-alpha.md`).
+
+The t0-alpha and t0-beta NOTICE file reads, verbatim:
+
+    T0 (tfc-t0)
+    Copyright 2026 The Forecasting Company
+
+    This product includes software developed at Datadog (https://www.datadoghq.com/),
+    Copyright 2025 Datadog, Inc., licensed under the Apache License 2.0.
+    Source: https://github.com/DataDog/toto
+
+    This product includes software derived from Chronos-2 by Amazon.com, Inc. or
+    its affiliates, Copyright Amazon.com, Inc. All Rights Reserved, licensed under
+    the Apache License 2.0.
+    Source: https://github.com/amazon-science/chronos-forecasting
 
 ## gluonts
 
@@ -49,8 +64,10 @@ GIFT-Eval benchmark.
 
 ## Burn / cubecl
 
-The native and WASM inference backends are built on the Burn deep-learning
-framework and its cubecl GPU-kernel compiler.
+The CPU engine (`t0-core`, native and WASM) and the native Burn `wgpu`
+backend are built on the Burn deep-learning framework and its cubecl
+GPU-kernel compiler. `t0-fast` uses wgpu directly
+(https://github.com/gfx-rs/wgpu, Apache-2.0 OR MIT).
 
 - Project: https://github.com/tracel-ai/burn and https://github.com/tracel-ai/cubecl
 - License: Apache License, Version 2.0 OR MIT (dual-licensed)
