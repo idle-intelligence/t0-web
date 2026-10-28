@@ -78,7 +78,7 @@ struct Case {
 
 /// `tools/make_fixtures.py`'s `manifest_long.json`: same idea as
 /// `Manifest`/`Case`, but each case carries its own `context_len`/`horizon`
-/// (rollout fixtures aren't all the same size the way the milestone-1 ones
+/// (rollout fixtures aren't all the same size the way the standard ones
 /// are) and skips the patch-embedding/layer0 trace comparison -- a rollout
 /// runs `model.forward` several times over different windows, so "the"
 /// trace isn't a single well-defined thing to compare.

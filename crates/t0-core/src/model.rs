@@ -315,7 +315,7 @@ fn gather_rows<B: Backend>(table: Tensor<B, 2>, idx: &[i64], device: &B::Device)
 
 /// Full `predict()` for a single window (no autoregressive rollout — valid
 /// whenever `context_len + horizon <= max_horizon` (1024), true for every
-/// fixture in this milestone). Mirrors
+/// parity fixture). Mirrors
 /// `RolloutManager.{prepare_rollout_buffer,predict_step}` with
 /// `query_quantile_levels == model.head.quantile_levels` (so
 /// `interpolate_quantiles` is the identity — see `t0/quantile.py`).
@@ -459,9 +459,9 @@ fn forecast_series_prepare<B: Backend>(
     // patches via `TimeSeries::pad` (left-pads context, right-pads horizon
     // with WITHHELD), forward once, then truncate the padded-horizon output
     // back down to the caller's real `horizon`. Matches `Patcher.pad` +
-    // `RolloutManager.predict_step`'s own pad/truncate, restricted (like
-    // the rest of this milestone) to windows that fit in one non-rollout
-    // forward pass.
+    // `RolloutManager.predict_step`'s own pad/truncate, restricted to
+    // windows that fit in one non-rollout forward pass (`forecast_rollout`
+    // handles longer ones).
     let pad_left = (patch_size - t_ctx % patch_size) % patch_size;
     let padded_horizon = horizon.div_ceil(patch_size) * patch_size;
     let padded_t_ctx = t_ctx + pad_left;

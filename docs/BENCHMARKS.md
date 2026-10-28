@@ -408,8 +408,8 @@ Commands, full timing breakdown per config: `docs/runs/2026-09-20-beta.md`.
   blocked beta entirely — see `docs/runs/2026-09-20-beta-fast.md`).
 - Command shape: `t0-cli bench --backend fast --fast-quant <q8_0|q4_0>
   --signals <1|24> --context 512 --horizon 32 --chunk 24 --reps 20
-  --warmup 3`, median of 20 reps after 3 warmup reps, alpha and beta run
-  in the same run for direct comparability.
+  --warmup 3`, median of 20 reps after 3 warmup reps, alpha and beta measured
+  back to back for direct comparability.
 
 Parity (max-abs quantile error, gate <=1e-4 for F32):
 

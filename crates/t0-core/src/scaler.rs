@@ -7,7 +7,7 @@
 //! timestep) to invert the scaling on quantile predictions.
 //!
 //! Only the `TARGET`/`HISTORICAL` (causal) branch is implemented — no
-//! fixture in this milestone uses `FUTURE` covariate rows (the non-causal
+//! fixture or demo uses `FUTURE` covariate rows (the non-causal
 //! global-stats branch in the reference), so we fail loudly rather than
 //! silently produce wrong numbers for them.
 
@@ -50,7 +50,7 @@ impl CausalScaler {
             let base = row * t;
             for vt in &series.variate_type[base..base + t] {
                 if *vt == VariateType::Future as i64 {
-                    panic!("FUTURE covariate rows are not supported in this milestone's scaler port");
+                    panic!("FUTURE covariate rows are not supported by this scaler port");
                 }
             }
             self.causal_row_stats(
@@ -87,7 +87,7 @@ impl CausalScaler {
 
     /// Welford causal mean/std over one row, `eps`-guarded per `eps_mode`.
     /// No group-boundary resets: callers only ever hand this one segment
-    /// (one series per row), matching every fixture in this milestone.
+    /// (one series per row), matching every fixture.
     fn causal_row_stats(&self, x: &[f32], mask: &[i8], loc: &mut [f32], scale: &mut [f32]) {
         let t = x.len();
         let mut count = 0.0f32;

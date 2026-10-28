@@ -1,7 +1,6 @@
 //! Attention masks, mirroring `t0.mask` (`tfc-t0` PyPI package,
 //! `t0/mask.py`). Computed on the CPU from per-timestep mask/group-id/
-//! variate-type arrays (small: at most a few hundred patches × variates for
-//! this milestone) and uploaded as additive float masks (`0.0` = attend,
+//! variate-type arrays (small: at most a few hundred patches × variates) and uploaded as additive float masks (`0.0` = attend,
 //! a large negative = blocked) so the attention kernel only needs one add.
 
 use crate::data::{MaskType, VariateType};
